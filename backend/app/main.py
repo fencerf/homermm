@@ -23,7 +23,7 @@ def on_startup():
 app.include_router(api_router, prefix="/api")
 
 # Serve the static files from the React build
-if os.path.exists("static"):
+if os.path.exists("static/index.html"):
     app.mount("/assets", StaticFiles(directory="static/assets"), name="assets")
 
     @app.get("/{full_path:path}")

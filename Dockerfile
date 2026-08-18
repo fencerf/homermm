@@ -10,10 +10,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy backend source
 COPY backend/app ./app
-COPY backend/hcms.db ./
 
 # Copy compiled frontend to serve statically
-COPY backend/static ./static
+COPY frontend/dist ./static
 
 # Expose port
 EXPOSE 8000
