@@ -1,0 +1,12 @@
+services:
+  hcms-server:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/hcms.db:/app/hcms.db
+    restart: unless-stopped
+    environment:
+      - ADMIN_PASSWORD=admin
+      - ADMIN_TOKEN=admin_secret_token
+      - AGENT_API_KEY=dummy_agent_key_123
