@@ -1,3 +1,14 @@
+# Stage 1: Build the React frontend
+FROM node:18-alpine AS frontend-builder
+WORKDIR /app/frontend
+# Copy package files and install dependencies
+COPY frontend/package*.json ./
+RUN npm install
+# Copy the rest of the frontend source and build
+COPY frontend/ ./
+RUN npm run build
+
+# Stage 2: Build the FastAPI backend
 FROM python:3.12-slim
 WORKDIR /app
 
@@ -11,8 +22,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy backend source
 COPY backend/app ./app
 
-# Copy compiled frontend to serve statically
-COPY frontend/dist ./static
+# Copy compiled frontend from Stage 1 to serve statically
+COPY --from=frontend-builder /app/frontend/dist ./static
 
 # Expose port
 EXPOSE 8000
