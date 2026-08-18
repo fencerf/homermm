@@ -1,0 +1,6 @@
+agent/
+node_modules/
+.env
+.git/
+__pycache__/
+*.pyc
