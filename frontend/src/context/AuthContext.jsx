@@ -6,8 +6,13 @@ const AuthContext = createContext();
 
 export const useAuth = () => useContext(AuthContext);
 
+const initialToken = localStorage.getItem('token');
+if (initialToken) {
+    axios.defaults.headers.common['Authorization'] = `Bearer ${initialToken}`;
+}
+
 export const AuthProvider = ({ children }) => {
-    const [token, setToken] = useState(localStorage.getItem('token'));
+    const [token, setToken] = useState(initialToken);
     const navigate = useNavigate();
 
     const login = async (password) => {
@@ -37,6 +42,8 @@ export const AuthProvider = ({ children }) => {
     useEffect(() => {
         if (token) {
             axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+        } else {
+            delete axios.defaults.headers.common['Authorization'];
         }
     }, [token]);
 
