@@ -6,8 +6,11 @@ import os
 import json
 
 from app.core.database import get_db
+from app.core.logging_db import log_audit_action, get_log_engine, AgentLog, AuditLog
 from app.models import database as models
 from app.schemas import schemas
+from app.core.websocket_manager import manager
+from fastapi import WebSocket, WebSocketDisconnect
 
 router = APIRouter()
 
@@ -57,6 +60,14 @@ def create_task(machine_id: int, task: schemas.AgentTaskCreate, db: Session = De
     db.add(db_task)
     db.commit()
     db.refresh(db_task)
+
+    log_audit_action(
+        machine_id=machine_id,
+        action=f"Created task: {task.task_type}",
+        user="admin", # Simplification since we have single-user admin token
+        details=f"Task ID: {db_task.id}, Payload: {task.payload}"
+    )
+
     return db_task
 
 @router.get("/machines/{machine_id}/tasks/{task_id}", response_model=schemas.AgentTask)
@@ -68,6 +79,26 @@ def get_task(machine_id: int, task_id: int, db: Session = Depends(get_db), _: st
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     return task
+
+@router.get("/machines/{machine_id}/logs/agent", response_model=List[schemas.AgentLog])
+def get_machine_agent_logs(machine_id: int, db: Session = Depends(get_db), _: str = Depends(verify_admin)):
+    machine = db.query(models.Machine).filter(models.Machine.id == machine_id).first()
+    if not machine:
+        raise HTTPException(status_code=404, detail="Machine not found")
+
+    LogSession = get_log_engine(machine_id)
+    with LogSession() as log_db:
+        return log_db.query(AgentLog).order_by(AgentLog.timestamp.desc()).limit(100).all()
+
+@router.get("/machines/{machine_id}/logs/audit", response_model=List[schemas.AuditLog])
+def get_machine_audit_logs(machine_id: int, db: Session = Depends(get_db), _: str = Depends(verify_admin)):
+    machine = db.query(models.Machine).filter(models.Machine.id == machine_id).first()
+    if not machine:
+        raise HTTPException(status_code=404, detail="Machine not found")
+
+    LogSession = get_log_engine(machine_id)
+    with LogSession() as log_db:
+        return log_db.query(AuditLog).order_by(AuditLog.timestamp.desc()).limit(100).all()
 
 @router.get("/settings", response_model=List[schemas.GlobalSettings])
 def get_settings(db: Session = Depends(get_db), _: str = Depends(verify_admin)):
@@ -84,6 +115,25 @@ def update_settings(settings: List[schemas.GlobalSettingsBase], db: Session = De
             db.add(db_setting)
     db.commit()
     return {"status": "success"}
+
+from fastapi import Query
+
+@router.websocket("/machines/{machine_id}/ws")
+async def websocket_frontend_endpoint(websocket: WebSocket, machine_id: int, token: str = Query(None)):
+    if token != ADMIN_TOKEN:
+        await websocket.close(code=1008)
+        return
+    await manager.connect_frontend(websocket, machine_id)
+    try:
+        while True:
+            data = await websocket.receive_json()
+            # Relay requests from the frontend down to the agent
+            try:
+                await manager.relay_to_agent(machine_id, data)
+            except Exception as e:
+                await websocket.send_json({"error": str(e), "type": "error"})
+    except WebSocketDisconnect:
+        manager.disconnect_frontend(websocket, machine_id)
 
 @router.post("/auth/login")
 def login(request: LoginRequest):

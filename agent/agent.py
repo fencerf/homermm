@@ -7,16 +7,86 @@ import subprocess
 import json
 import os
 import argparse
+import logging
+import threading
+from datetime import datetime
+import websocket
+
+# Logging setup
+log_buffer = []
+log_buffer_lock = threading.Lock()
+
+class BufferedServerLogHandler(logging.Handler):
+    def emit(self, record):
+        try:
+            log_entry = {
+                "timestamp": datetime.utcnow().isoformat(),
+                "level": record.levelname,
+                "message": self.format(record),
+                "module": record.module
+            }
+            with log_buffer_lock:
+                log_buffer.append(log_entry)
+        except Exception:
+            self.handleError(record)
 
 # Parse command line arguments
 parser = argparse.ArgumentParser(description="HCMS Client Agent")
 parser.add_argument("-s", "--server", type=str, help="Address of the HCMS server (e.g. http://192.168.1.100:8000)")
+parser.add_argument("--log-level", type=str, default=os.environ.get("LOG_LEVEL", "INFO"), help="Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)")
+parser.add_argument("--log-file", type=str, default=os.environ.get("LOG_FILE"), help="Path to log file")
 args = parser.parse_args()
 
 # Configuration
 SERVER_URL = args.server if args.server else os.environ.get("SERVER_URL", "http://127.0.0.1:8000")
 AGENT_API_KEY = os.environ.get("AGENT_API_KEY", "dummy_agent_key_123")
 HEADERS = {"x-agent-key": AGENT_API_KEY}
+MACHINE_ID = None
+
+# Configure Logging
+log_level_num = getattr(logging, args.log_level.upper(), logging.INFO)
+handlers = [logging.StreamHandler(), BufferedServerLogHandler()]
+if args.log_file:
+    handlers.append(logging.FileHandler(args.log_file))
+
+logging.basicConfig(
+    level=log_level_num,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=handlers
+)
+logger = logging.getLogger("hcms_agent")
+
+def send_logs_to_server():
+    global MACHINE_ID
+    while True:
+        time.sleep(10)
+        if MACHINE_ID is None:
+            continue
+
+        with log_buffer_lock:
+            if not log_buffer:
+                continue
+            batch = log_buffer[:]
+            log_buffer.clear()
+
+        try:
+            response = requests.post(
+                f"{SERVER_URL}/api/agent/{MACHINE_ID}/logs",
+                json={"logs": batch},
+                headers=HEADERS,
+                timeout=5
+            )
+            if response.status_code != 200:
+                # If failed, push back to buffer
+                with log_buffer_lock:
+                    log_buffer.extend(batch)
+        except Exception as e:
+            # If failed, push back to buffer
+            with log_buffer_lock:
+                log_buffer.extend(batch)
+
+# Start logging thread
+threading.Thread(target=send_logs_to_server, daemon=True).start()
 
 def get_system_info():
     uname = platform.uname()
@@ -91,7 +161,7 @@ def get_available_updates():
                         "update_type": "software"
                     })
         except Exception as e:
-            print(f"Error checking apt updates: {e}")
+            logger.error(f"Error checking apt updates: {e}")
 
     elif os_name == "Windows":
         # 1. Check Winget (Software Updates)
@@ -217,20 +287,51 @@ def execute_task(task):
             return "failed", "Software installation via agent is currently only supported on Windows using winget."
 
     elif task_type == "configure_kopia":
+        try:
+            payload_data = json.loads(task['payload'])
+        except json.JSONDecodeError:
+            return "failed", "Invalid payload json"
+
         paths = payload_data.get("paths", [])
+        kopia_settings = payload_data.get("kopia_settings", {})
+
         if not paths:
             return "failed", "No paths provided for Kopia backup."
+        if not kopia_settings:
+             return "failed", "No Kopia server settings found."
 
-        # In a real environment, we would first connect to the repository using details fetched from the server.
-        # We will simulate setting up the policy for each path.
-        results = []
-        for path in paths:
-            try:
-                results.append(f"Successfully set Kopia policy for {path}")
-            except Exception as e:
-                results.append(f"Failed setting policy for {path}: {str(e)}")
+        try:
+            password = kopia_settings.get("kopia_repo_password")
+            if not password:
+                return "failed", "No Kopia repository password provided."
 
-        return "completed", "; ".join(results)
+            fingerprint = kopia_settings.get("kopia_server_cert_fingerprint", "")
+
+            connect_cmd = [
+                "kopia", "repository", "connect", "server",
+                "--url", kopia_settings.get("kopia_server_url", "https://localhost:51515"),
+                "--override-username", "admin",
+                "--override-hostname", socket.gethostname(),
+                "--password", password
+            ]
+            if fingerprint:
+                connect_cmd.extend(["--server-cert-fingerprint", fingerprint])
+
+            subprocess.run(connect_cmd, check=True, capture_output=True, text=True)
+
+            results = []
+            for path in paths:
+                try:
+                    subprocess.run(["kopia", "policy", "set", path, "--add-include", path], check=True, capture_output=True, text=True)
+                    results.append(f"Successfully set Kopia policy for {path}")
+                except subprocess.CalledProcessError as e:
+                    results.append(f"Failed setting policy for {path}: {e.stderr}")
+
+            return "completed", "; ".join(results)
+        except subprocess.CalledProcessError as e:
+            return "failed", f"Failed to connect to Kopia server: {e.stderr}"
+        except FileNotFoundError:
+             return "failed", "Kopia CLI not found on machine."
 
     elif task_type == "list_directory":
         path = payload_data.get("path")
@@ -264,11 +365,79 @@ def execute_task(task):
         except Exception as e:
             return "failed", str(e)
 
+    elif task_type == "start_filebrowser_ws":
+        # Launching websocket connection in a separate thread
+        threading.Thread(target=interactive_filebrowser_ws, daemon=True).start()
+        return "completed", "WebSocket filebrowser connection established"
+
     return "failed", f"Unknown task type: {task_type}"
 
+def interactive_filebrowser_ws():
+    global MACHINE_ID
+    if MACHINE_ID is None:
+        logger.error("Cannot start WebSocket, no MACHINE_ID")
+        return
+
+    ws_url = SERVER_URL.replace("http://", "ws://").replace("https://", "wss://")
+    ws_url = f"{ws_url}/api/agent/{MACHINE_ID}/ws?token={AGENT_API_KEY}"
+
+    def on_message(ws, message):
+        try:
+            req = json.loads(message)
+            if req.get("type") == "list_directory":
+                path = req.get("path", "")
+
+                items = []
+                os_name = platform.system()
+                if os_name == "Windows" and not path:
+                    partitions = psutil.disk_partitions()
+                    for partition in partitions:
+                        items.append({
+                            "name": partition.device,
+                            "path": partition.device,
+                            "is_dir": True
+                        })
+                    ws.send(json.dumps({"type": "directory_result", "current_path": path, "items": items, "req_id": req.get("req_id")}))
+                else:
+                    if not path:
+                        path = "/"
+                    try:
+                        with os.scandir(path) as entries:
+                            for entry in entries:
+                                items.append({
+                                    "name": entry.name,
+                                    "path": entry.path,
+                                    "is_dir": entry.is_dir()
+                                })
+                        items.sort(key=lambda x: (not x["is_dir"], x["name"].lower()))
+                        ws.send(json.dumps({"type": "directory_result", "current_path": path, "items": items, "req_id": req.get("req_id")}))
+                    except Exception as e:
+                         ws.send(json.dumps({"type": "directory_error", "error": str(e), "req_id": req.get("req_id")}))
+        except Exception as e:
+            logger.error(f"Error in ws on_message: {e}")
+
+    def on_error(ws, error):
+        logger.error(f"WebSocket file browser error: {error}")
+
+    def on_close(ws, close_status_code, close_msg):
+        logger.info("WebSocket file browser closed")
+
+    def on_open(ws):
+        logger.info("WebSocket file browser connected")
+
+    # Disable websocket trace
+    websocket.enableTrace(False)
+    ws = websocket.WebSocketApp(ws_url,
+                              on_open=on_open,
+                              on_message=on_message,
+                              on_error=on_error,
+                              on_close=on_close)
+
+    ws.run_forever()
+
 def main_loop():
-    print(f"Agent starting... Connecting to {SERVER_URL}")
-    machine_id = None
+    global MACHINE_ID
+    logger.info(f"Agent starting... Connecting to {SERVER_URL}")
 
     while True:
         try:
@@ -277,25 +446,25 @@ def main_loop():
             resp = requests.post(f"{SERVER_URL}/api/agent/register", json=sys_info, headers=HEADERS)
             resp.raise_for_status()
             machine_data = resp.json()
-            machine_id = machine_data["id"]
+            MACHINE_ID = machine_data["id"]
 
             # 2. Check and submit updates
             updates = get_available_updates()
-            requests.post(f"{SERVER_URL}/api/agent/{machine_id}/updates", json=updates, headers=HEADERS)
+            requests.post(f"{SERVER_URL}/api/agent/{MACHINE_ID}/updates", json=updates, headers=HEADERS)
 
             # 3. Fetch and execute tasks
-            resp = requests.get(f"{SERVER_URL}/api/agent/{machine_id}/tasks", headers=HEADERS)
+            resp = requests.get(f"{SERVER_URL}/api/agent/{MACHINE_ID}/tasks", headers=HEADERS)
             tasks = resp.json()
 
             for task in tasks:
-                print(f"Executing task: {task['task_type']}")
+                logger.info(f"Executing task: {task['task_type']}")
                 status, msg = execute_task(task)
-                requests.post(f"{SERVER_URL}/api/agent/{machine_id}/tasks/{task['id']}/result", params={"status": status, "result_message": msg}, headers=HEADERS)
+                requests.post(f"{SERVER_URL}/api/agent/{MACHINE_ID}/tasks/{task['id']}/result", params={"status": status, "result_message": msg}, headers=HEADERS)
 
         except requests.exceptions.RequestException as e:
-            print(f"Error communicating with server: {e}")
+            logger.error(f"Error communicating with server: {e}")
         except Exception as e:
-            print(f"Unexpected error: {e}")
+            logger.error(f"Unexpected error: {e}")
 
         # Fast polling interval for interactive features
         time.sleep(5)

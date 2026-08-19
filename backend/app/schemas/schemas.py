@@ -48,6 +48,37 @@ class AgentTaskBase(BaseModel):
     payload: str
     scheduled_for: Optional[datetime] = None
 
+class AgentLogCreate(BaseModel):
+    timestamp: datetime
+    level: str
+    message: str
+    module: Optional[str] = None
+
+class AgentLogsBatch(BaseModel):
+    logs: List[AgentLogCreate]
+
+class AgentLog(BaseModel):
+    id: int
+    timestamp: datetime
+    level: str
+    message: str
+    module: Optional[str] = None
+
+    class Config:
+        orm_mode = True
+        from_attributes = True
+
+class AuditLog(BaseModel):
+    id: int
+    timestamp: datetime
+    action: str
+    user: str
+    details: str
+
+    class Config:
+        orm_mode = True
+        from_attributes = True
+
 class AgentTaskCreate(AgentTaskBase):
     pass
 
