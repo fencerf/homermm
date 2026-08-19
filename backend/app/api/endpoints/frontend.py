@@ -59,6 +59,16 @@ def create_task(machine_id: int, task: schemas.AgentTaskCreate, db: Session = De
     db.refresh(db_task)
     return db_task
 
+@router.get("/machines/{machine_id}/tasks/{task_id}", response_model=schemas.AgentTask)
+def get_task(machine_id: int, task_id: int, db: Session = Depends(get_db), _: str = Depends(verify_admin)):
+    task = db.query(models.AgentTask).filter(
+        models.AgentTask.id == task_id,
+        models.AgentTask.machine_id == machine_id
+    ).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return task
+
 @router.get("/settings", response_model=List[schemas.GlobalSettings])
 def get_settings(db: Session = Depends(get_db), _: str = Depends(verify_admin)):
     return db.query(models.GlobalSettings).all()
