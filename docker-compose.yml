@@ -10,3 +10,4 @@ services:
       - ADMIN_PASSWORD=admin
       - ADMIN_TOKEN=admin_secret_token
       - AGENT_API_KEY=dummy_agent_key_123
+      - TZ=America/New_York
