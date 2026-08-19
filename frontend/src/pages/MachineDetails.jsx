@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, Cpu, HardDrive, Database, RefreshCw, Archive } from 'lucide-react';
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 
 function MachineDetails() {
     const { id } = useParams();
@@ -94,9 +95,34 @@ function MachineDetails() {
                         </div>
                         <div className="flex items-start">
                             <HardDrive className="text-gray-400 mr-3 mt-1" size={20} />
-                            <div>
-                                <p className="text-sm text-gray-500 font-semibold uppercase tracking-wider">Disk</p>
-                                <p>{machine.disk_total} GB</p>
+                            <div className="w-full">
+                                <p className="text-sm text-gray-500 font-semibold uppercase tracking-wider mb-2">Disk</p>
+                                <div className="flex items-center space-x-4">
+                                    <div className="h-24 w-24">
+                                        <ResponsiveContainer width="100%" height="100%">
+                                            <PieChart>
+                                                <Pie
+                                                    data={[
+                                                        { name: 'Used', value: machine.disk_used },
+                                                        { name: 'Free', value: machine.disk_total - machine.disk_used }
+                                                    ]}
+                                                    cx="50%" cy="50%"
+                                                    innerRadius={25} outerRadius={40}
+                                                    dataKey="value" stroke="none"
+                                                >
+                                                    <Cell key="cell-0" fill="#EF4444" /> {/* Red for used */}
+                                                    <Cell key="cell-1" fill="#E5E7EB" /> {/* Gray for free */}
+                                                </Pie>
+                                                <Tooltip formatter={(value) => `${value} GB`} />
+                                            </PieChart>
+                                        </ResponsiveContainer>
+                                    </div>
+                                    <div className="text-sm">
+                                        <p><span className="inline-block w-3 h-3 bg-red-500 rounded-full mr-1"></span> Used: {machine.disk_used} GB</p>
+                                        <p><span className="inline-block w-3 h-3 bg-gray-200 rounded-full mr-1"></span> Free: {machine.disk_total - machine.disk_used} GB</p>
+                                        <p className="mt-1 text-xs text-gray-400">Total: {machine.disk_total} GB</p>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -117,32 +143,60 @@ function MachineDetails() {
                     {updates.length === 0 ? (
                         <p className="text-gray-500 italic">No updates available or agent hasn't reported yet.</p>
                     ) : (
-                        <div className="overflow-auto max-h-96">
-                            <table className="min-w-full text-left text-sm whitespace-nowrap">
-                                <thead className="uppercase tracking-wider border-b-2 border-gray-200 bg-gray-50">
-                                    <tr>
-                                        <th className="px-4 py-3 font-medium text-gray-600">Package</th>
-                                        <th className="px-4 py-3 font-medium text-gray-600">New Version</th>
-                                        <th className="px-4 py-3 font-medium text-gray-600">Action</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {updates.map((update, idx) => (
-                                        <tr key={idx} className="border-b border-gray-200 hover:bg-gray-50">
-                                            <td className="px-4 py-3 font-medium text-gray-900">{update.package_name}</td>
-                                            <td className="px-4 py-3 text-gray-500">{update.new_version}</td>
-                                            <td className="px-4 py-3">
-                                                <button
-                                                    onClick={() => handleInstallUpdate(update.package_name)}
-                                                    className="text-blue-600 hover:text-blue-900 text-xs font-semibold px-2 py-1 border border-blue-200 rounded hover:bg-blue-50"
-                                                >
-                                                    Install
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
+                        <div className="overflow-auto max-h-96 space-y-6">
+                            {/* Software Updates */}
+                            {updates.filter(u => u.update_type === 'software').length > 0 && (
+                                <div>
+                                    <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-2 bg-gray-50 py-1 px-2 rounded">Software Updates</h3>
+                                    <table className="min-w-full text-left text-sm whitespace-nowrap">
+                                        <thead className="uppercase tracking-wider border-b-2 border-gray-200">
+                                            <tr>
+                                                <th className="px-4 py-2 font-medium text-gray-500">Package</th>
+                                                <th className="px-4 py-2 font-medium text-gray-500">New Version</th>
+                                                <th className="px-4 py-2 font-medium text-gray-500">Action</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {updates.filter(u => u.update_type === 'software').map((update, idx) => (
+                                                <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
+                                                    <td className="px-4 py-2 font-medium text-gray-900">{update.package_name}</td>
+                                                    <td className="px-4 py-2 text-gray-500">{update.new_version}</td>
+                                                    <td className="px-4 py-2">
+                                                        <button
+                                                            onClick={() => handleInstallUpdate(update.package_name)}
+                                                            className="text-blue-600 hover:text-blue-900 text-xs font-semibold px-2 py-1 border border-blue-200 rounded hover:bg-blue-50"
+                                                        >
+                                                            Install
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+
+                            {/* OS Updates */}
+                            {updates.filter(u => u.update_type === 'os').length > 0 && (
+                                <div>
+                                    <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-2 bg-gray-50 py-1 px-2 rounded">OS Updates</h3>
+                                    <table className="min-w-full text-left text-sm whitespace-nowrap">
+                                        <thead className="uppercase tracking-wider border-b-2 border-gray-200">
+                                            <tr>
+                                                <th className="px-4 py-2 font-medium text-gray-500">Update Title</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {updates.filter(u => u.update_type === 'os').map((update, idx) => (
+                                                <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
+                                                    <td className="px-4 py-2 font-medium text-gray-900">{update.package_name}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                    <p className="mt-2 text-xs text-gray-400 italic">OS Updates must be installed manually on the host machine.</p>
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>
@@ -171,9 +225,18 @@ function MachineDetails() {
                             Push Kopia Config to Agent
                         </button>
                     </form>
-                    <p className="mt-4 text-sm text-gray-500 italic">
+                    <p className="mt-4 text-sm text-gray-500 italic mb-4">
                         Note: Kopia server connection settings are managed globally in Settings.
                     </p>
+
+                    {machine.kopia_config && (
+                        <div className="mt-6 border-t pt-4">
+                            <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-2">Active Agent Policies (Raw)</h3>
+                            <pre className="bg-gray-50 p-4 rounded text-xs text-gray-800 overflow-auto border border-gray-200 max-h-48">
+                                {machine.kopia_config}
+                            </pre>
+                        </div>
+                    )}
                 </div>
             </div>
         </div>

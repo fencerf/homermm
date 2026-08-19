@@ -27,9 +27,24 @@ def get_system_info():
 
     # Disk
     disk_total = 0
+    disk_used = 0
     try:
-        disk_usage = psutil.disk_usage('/')
+        if os_name == "Windows":
+            disk_usage = psutil.disk_usage('C:\\')
+        else:
+            disk_usage = psutil.disk_usage('/')
         disk_total = int(disk_usage.total / (1024 ** 3)) # GB
+        disk_used = int(disk_usage.used / (1024 ** 3)) # GB
+    except Exception:
+        pass
+
+    # Kopia Policies
+    kopia_config = None
+    try:
+        # Fetch active kopia policies if kopia is installed and connected
+        result = subprocess.run(["kopia", "policy", "list", "--json"], capture_output=True, text=True)
+        if result.returncode == 0:
+            kopia_config = result.stdout
     except Exception:
         pass
 
@@ -44,6 +59,8 @@ def get_system_info():
         "cpu_info": cpu_info,
         "memory_total": memory_total,
         "disk_total": disk_total,
+        "disk_used": disk_used,
+        "kopia_config": kopia_config,
         "ip_address": ip_address
     }
 
@@ -65,25 +82,60 @@ def get_available_updates():
                     new_version = parts[1]
                     updates.append({
                         "package_name": package_name,
-                        "new_version": new_version
+                        "new_version": new_version,
+                        "update_type": "software"
                     })
         except Exception as e:
             print(f"Error checking apt updates: {e}")
 
     elif os_name == "Windows":
+        # 1. Check Winget (Software Updates)
         try:
-            result = subprocess.run(["winget", "upgrade"], capture_output=True, text=True)
-            # Basic parsing of winget output (very fragile in reality, but works for concept)
+            # Setting encoding parameter to avoid decoding errors on windows
+            result = subprocess.run(["winget", "upgrade"], capture_output=True, text=True, encoding="utf-8", errors="ignore")
             lines = result.stdout.split('\n')
+            # Look for the start of the table
+            in_table = False
             for line in lines:
-                # Winget output formatting varies, a robust agent would use a structured format or PS script
-                if len(line) > 5 and not line.startswith("Name") and not line.startswith("-"):
+                if line.startswith("Name") and "Id" in line and "Version" in line:
+                    in_table = True
+                    continue
+                if in_table and line.startswith("-"):
+                    continue
+                if in_table and len(line.strip()) > 5:
                     parts = line.split()
+                    # Winget columns are separated by spaces. The id is usually the second to last part or the first.
+                    # We'll just grab the ID and mark the version as "winget"
                     if len(parts) >= 3:
+                        package_id = parts[1] if "." in parts[1] else parts[0]
                         updates.append({
-                            "package_name": parts[0], # ID usually works better for upgrade
-                            "new_version": parts[-1]  # Last column is usually Available version
+                            "package_name": package_id,
+                            "new_version": "winget",
+                            "update_type": "software"
                         })
+        except Exception:
+            pass
+
+        # 2. Check Windows OS Updates via COM
+        try:
+            # We will invoke PowerShell to query Microsoft.Update.Session
+            ps_script = """
+            $UpdateSession = New-Object -ComObject Microsoft.Update.Session
+            $UpdateSearcher = $UpdateSession.CreateUpdateSearcher()
+            $SearchResult = $UpdateSearcher.Search("IsInstalled=0 and Type='Software'")
+            foreach ($update in $SearchResult.Updates) {
+                Write-Output $update.Title
+            }
+            """
+            result = subprocess.run(["powershell", "-NoProfile", "-Command", ps_script], capture_output=True, text=True)
+            if result.returncode == 0:
+                os_lines = [line.strip() for line in result.stdout.split('\n') if line.strip()]
+                for title in os_lines:
+                    updates.append({
+                        "package_name": title,
+                        "new_version": "Pending",
+                        "update_type": "os"
+                    })
         except Exception:
             pass
 

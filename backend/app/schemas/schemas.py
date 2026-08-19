@@ -9,6 +9,8 @@ class MachineBase(BaseModel):
     cpu_info: str
     memory_total: int
     disk_total: int
+    disk_used: int = 0
+    kopia_config: Optional[str] = None
     ip_address: str
 
 class MachineCreate(MachineBase):
@@ -27,6 +29,7 @@ class PendingUpdateBase(BaseModel):
     package_name: str
     current_version: Optional[str] = None
     new_version: Optional[str] = None
+    update_type: Optional[str] = "software"
 
 class PendingUpdateCreate(PendingUpdateBase):
     pass

@@ -14,9 +14,11 @@ class Machine(Base):
     cpu_info = Column(String)
     memory_total = Column(Integer) # In MB
     disk_total = Column(Integer) # In GB
+    disk_used = Column(Integer, default=0) # In GB
     ip_address = Column(String)
     last_seen = Column(DateTime, default=datetime.utcnow)
     is_online = Column(Boolean, default=True)
+    kopia_config = Column(Text, nullable=True) # JSON string of kopia policies
 
     updates = relationship("PendingUpdate", back_populates="machine", cascade="all, delete-orphan")
     tasks = relationship("AgentTask", back_populates="machine", cascade="all, delete-orphan")
@@ -29,6 +31,7 @@ class PendingUpdate(Base):
     package_name = Column(String, nullable=False)
     current_version = Column(String)
     new_version = Column(String)
+    update_type = Column(String, default="software") # "software" or "os"
 
     machine = relationship("Machine", back_populates="updates")
 
