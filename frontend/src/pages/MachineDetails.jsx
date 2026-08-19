@@ -14,8 +14,8 @@ function MachineDetails() {
         const fetchData = async () => {
             try {
                 const [machineRes, updatesRes] = await Promise.all([
-                    axios.get(`http://127.0.0.1:8000/api/frontend/machines/${id}`),
-                    axios.get(`http://127.0.0.1:8000/api/frontend/machines/${id}/updates`)
+                    axios.get(`/api/frontend/machines/${id}`),
+                    axios.get(`/api/frontend/machines/${id}/updates`)
                 ]);
                 setMachine(machineRes.data);
                 setUpdates(updatesRes.data);
@@ -28,7 +28,7 @@ function MachineDetails() {
 
     const handleInstallUpdate = async (packageName) => {
         try {
-            await axios.post(`http://127.0.0.1:8000/api/frontend/machines/${id}/tasks`, {
+            await axios.post(`/api/frontend/machines/${id}/tasks`, {
                 task_type: "update_software",
                 payload: JSON.stringify({ package_name: packageName })
             });
@@ -43,7 +43,7 @@ function MachineDetails() {
         e.preventDefault();
         try {
             const pathsArray = kopiaPaths.split(',').map(p => p.trim()).filter(p => p);
-            await axios.post(`http://127.0.0.1:8000/api/frontend/machines/${id}/tasks`, {
+            await axios.post(`/api/frontend/machines/${id}/tasks`, {
                 task_type: "configure_kopia",
                 payload: JSON.stringify({ paths: pathsArray })
             });

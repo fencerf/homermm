@@ -13,7 +13,7 @@ export const AuthProvider = ({ children }) => {
     const login = async (password) => {
         try {
             // Simplified logic as required for simple admin login iteration
-            const response = await axios.post('http://127.0.0.1:8000/api/frontend/auth/login?password=' + encodeURIComponent(password));
+            const response = await axios.post('/api/frontend/auth/login', { password });
             if (response.data.access_token) {
                 setToken(response.data.access_token);
                 localStorage.setItem('token', response.data.access_token);

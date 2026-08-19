@@ -9,7 +9,7 @@ function Dashboard() {
     useEffect(() => {
         const fetchMachines = async () => {
             try {
-                const response = await axios.get('http://127.0.0.1:8000/api/frontend/machines');
+                const response = await axios.get('/api/frontend/machines');
                 setMachines(response.data);
             } catch (error) {
                 console.error("Error fetching machines", error);
