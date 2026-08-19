@@ -1,6 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 from typing import List
+from pydantic import BaseModel
+import os
+import json
 
 from app.core.database import get_db
 from app.models import database as models
@@ -8,8 +11,11 @@ from app.schemas import schemas
 
 router = APIRouter()
 
-# Very simple single-admin auth
-ADMIN_TOKEN = "admin_secret_token"
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "admin_secret_token")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin")
+
+class LoginRequest(BaseModel):
+    password: str
 
 def verify_admin(authorization: str = Header(None)):
     if authorization != f"Bearer {ADMIN_TOKEN}":
@@ -70,8 +76,7 @@ def update_settings(settings: List[schemas.GlobalSettingsBase], db: Session = De
     return {"status": "success"}
 
 @router.post("/auth/login")
-def login(password: str):
-    # In a real app this would hash check. For now hardcode.
-    if password == "admin":
+def login(request: LoginRequest):
+    if request.password == ADMIN_PASSWORD:
         return {"access_token": ADMIN_TOKEN, "token_type": "bearer"}
     raise HTTPException(status_code=401, detail="Incorrect password")
