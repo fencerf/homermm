@@ -50,6 +50,11 @@ def init_db():
         except Exception:
             pass
 
+        try:
+            conn.execute(text("ALTER TABLE machines ADD COLUMN agent_version VARCHAR"))
+        except Exception:
+            pass
+
         conn.commit()
 
 def get_db():

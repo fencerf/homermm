@@ -14,16 +14,19 @@ function MachineDetails() {
     const [scheduleDate, setScheduleDate] = useState("");
     const [actionMessage, setActionMessage] = useState("");
     const [isBrowserOpen, setIsBrowserOpen] = useState(false);
+    const [latestAgentVersion, setLatestAgentVersion] = useState("");
 
     useEffect(() => {
         const fetchData = async () => {
             try {
-                const [machineRes, updatesRes] = await Promise.all([
+                const [machineRes, updatesRes, versionRes] = await Promise.all([
                     axios.get(`/api/frontend/machines/${id}`),
-                    axios.get(`/api/frontend/machines/${id}/updates`)
+                    axios.get(`/api/frontend/machines/${id}/updates`),
+                    axios.get(`/api/frontend/agent/version`)
                 ]);
                 setMachine(machineRes.data);
                 setUpdates(updatesRes.data);
+                setLatestAgentVersion(versionRes.data.version);
             } catch (error) {
                 console.error("Error fetching data", error);
             }
@@ -120,29 +123,39 @@ function MachineDetails() {
                 <div className="bg-white p-6 rounded-lg shadow-md border border-gray-200">
                     <div className="flex justify-between items-center border-b pb-2 mb-4">
                         <h2 className="text-xl font-bold">System Information</h2>
-                        <button
-                            onClick={async () => {
-                                try {
-                                    await axios.post(`/api/frontend/machines/${machine.id}/tasks`, {
-                                        task_type: "shutdown_agent",
-                                        payload: "{}"
-                                    });
-                                    setActionMessage("Agent shutdown command sent.");
-                                    setTimeout(() => setActionMessage(""), 3000);
-                                } catch (error) {
-                                    console.error("Failed to shutdown", error);
-                                }
-                            }}
-                            className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-xs rounded shadow"
-                        >
-                            Shutdown Agent
-                        </button>
+                        {latestAgentVersion !== "unknown" && machine.agent_version !== latestAgentVersion && (
+                            <button
+                                onClick={async () => {
+                                    try {
+                                        await axios.post(`/api/frontend/machines/${machine.id}/tasks`, {
+                                            task_type: "update_agent",
+                                            payload: "{}"
+                                        });
+                                        setActionMessage("Agent update command sent.");
+                                        setTimeout(() => setActionMessage(""), 3000);
+                                    } catch (error) {
+                                        console.error("Failed to update agent", error);
+                                    }
+                                }}
+                                className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded shadow"
+                            >
+                                Update Agent to v{latestAgentVersion}
+                            </button>
+                        )}
                     </div>
                     <div className="space-y-4">
-                        <div>
-                            <p className="text-sm text-gray-500 font-semibold uppercase tracking-wider">Hostname / OS</p>
-                            <p className="text-lg font-medium">{machine.hostname}</p>
-                            <p className="text-sm text-gray-600">{machine.os_name} {machine.os_version}</p>
+                        <div className="flex justify-between items-start">
+                            <div>
+                                <p className="text-sm text-gray-500 font-semibold uppercase tracking-wider">Hostname / OS</p>
+                                <p className="text-lg font-medium">{machine.hostname}</p>
+                                <p className="text-sm text-gray-600">{machine.os_name} {machine.os_version}</p>
+                            </div>
+                            <div className="text-right">
+                                <p className="text-sm text-gray-500 font-semibold uppercase tracking-wider">Agent Version</p>
+                                <p className={`text-sm font-medium ${machine.agent_version !== latestAgentVersion ? 'text-red-600' : 'text-green-600'}`}>
+                                    v{machine.agent_version || "Unknown"}
+                                </p>
+                            </div>
                         </div>
                         <div className="flex items-start">
                             <Cpu className="text-gray-400 mr-3 mt-1" size={20} />

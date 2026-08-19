@@ -20,6 +20,7 @@ class Machine(Base):
     last_seen = Column(DateTime, default=datetime.utcnow)
     is_online = Column(Boolean, default=True)
     kopia_config = Column(Text, nullable=True) # JSON string of kopia policies
+    agent_version = Column(String, nullable=True)
 
     updates = relationship("PendingUpdate", back_populates="machine", cascade="all, delete-orphan")
     tasks = relationship("AgentTask", back_populates="machine", cascade="all, delete-orphan")

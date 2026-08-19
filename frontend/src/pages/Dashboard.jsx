@@ -21,9 +21,32 @@ function Dashboard() {
         return () => clearInterval(interval);
     }, []);
 
+    const handleDownloadAgent = async () => {
+        try {
+            const response = await axios.get('/api/frontend/agent/download', { responseType: 'blob' });
+            const url = window.URL.createObjectURL(new Blob([response.data]));
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', 'agent.py');
+            document.body.appendChild(link);
+            link.click();
+            link.parentNode.removeChild(link);
+        } catch(e) {
+            console.error("Failed to download agent", e);
+        }
+    };
+
     return (
         <div className="p-6">
-            <h1 className="text-3xl font-bold mb-6 text-gray-800">Dashboard</h1>
+            <div className="flex justify-between items-center mb-6">
+                <h1 className="text-3xl font-bold text-gray-800">Dashboard</h1>
+                <button
+                    onClick={handleDownloadAgent}
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md shadow flex items-center transition-colors"
+                >
+                    <Monitor size={18} className="mr-2"/> Download Agent
+                </button>
+            </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {machines.map(machine => (

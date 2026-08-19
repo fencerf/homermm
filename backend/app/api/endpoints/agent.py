@@ -12,6 +12,7 @@ from app.core.websocket_manager import manager
 from fastapi import WebSocket, WebSocketDisconnect
 
 import os
+from fastapi.responses import FileResponse
 
 router = APIRouter()
 
@@ -20,6 +21,21 @@ AGENT_API_KEY = os.environ.get("AGENT_API_KEY", "dummy_agent_key_123")
 def verify_agent_key(x_agent_key: str = Header(...)):
     if x_agent_key != AGENT_API_KEY:
         raise HTTPException(status_code=401, detail="Invalid Agent Key")
+
+def get_agent_path():
+    # Dev path (host machine) vs Docker path
+    dev_path = os.path.join(os.path.dirname(__file__), "../../../../agent/agent.py")
+    prod_path = os.path.join(os.path.dirname(__file__), "../../../agent/agent.py") # /app/app/api/endpoints -> /app/agent/agent.py
+    if os.path.exists(prod_path):
+        return prod_path
+    return dev_path
+
+@router.get("/download")
+def download_agent(_: str = Depends(verify_agent_key)):
+    agent_path = get_agent_path()
+    if not os.path.exists(agent_path):
+        raise HTTPException(status_code=404, detail="Agent file not found")
+    return FileResponse(agent_path, filename="agent.py")
 
 @router.post("/register", response_model=schemas.Machine)
 def register_machine(machine: schemas.MachineCreate, db: Session = Depends(get_db), _: str = Depends(verify_agent_key)):
