@@ -507,8 +507,9 @@ def handle_exit_signal(signum, frame):
 def main_loop():
     global MACHINE_ID
 
-    signal.signal(signal.SIGINT, handle_exit_signal)
-    signal.signal(signal.SIGTERM, handle_exit_signal)
+    if threading.current_thread() is threading.main_thread():
+        signal.signal(signal.SIGINT, handle_exit_signal)
+        signal.signal(signal.SIGTERM, handle_exit_signal)
 
     logger.info(f"Agent starting... Connecting to {SERVER_URL}")
 
@@ -543,4 +544,48 @@ def main_loop():
         time.sleep(5)
 
 if __name__ == "__main__":
-    main_loop()
+    if platform.system() == "Windows":
+        try:
+            import win32serviceutil
+            import win32service
+            import win32event
+            import servicemanager
+
+            class HCMSAgentService(win32serviceutil.ServiceFramework):
+                _svc_name_ = "HCMSAgent"
+                _svc_display_name_ = "HCMS Client Agent"
+                _svc_description_ = "Home Computer Management System background agent"
+
+                def __init__(self, args):
+                    win32serviceutil.ServiceFramework.__init__(self, args)
+                    self.hWaitStop = win32event.CreateEvent(None, 0, 0, None)
+                    socket.setdefaulttimeout(60)
+
+                def SvcStop(self):
+                    self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
+                    logger.info("Service stopping...")
+                    win32event.SetEvent(self.hWaitStop)
+
+                def SvcDoRun(self):
+                    servicemanager.LogMsg(
+                        servicemanager.EVENTLOG_INFORMATION_TYPE,
+                        servicemanager.PYS_SERVICE_STARTED,
+                        (self._svc_name_, '')
+                    )
+                    logger.info("Service started")
+                    # Start the main loop in a separate thread so we can respond to SvcStop
+                    t = threading.Thread(target=main_loop, daemon=True)
+                    t.start()
+                    # Wait for stop signal
+                    win32event.WaitForSingleObject(self.hWaitStop, win32event.INFINITE)
+
+            if len(sys.argv) > 1 and sys.argv[1] in ['install', 'update', 'remove', 'start', 'stop', 'restart']:
+                win32serviceutil.HandleCommandLine(HCMSAgentService)
+            else:
+                # If no service commands passed, run normally
+                main_loop()
+        except ImportError:
+            logger.warning("pywin32 is not installed. Windows Service functionality disabled. Run 'pip install pywin32'.")
+            main_loop()
+    else:
+        main_loop()
