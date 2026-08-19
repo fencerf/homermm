@@ -7,7 +7,7 @@ import subprocess
 import json
 import os
 
-SERVER_URL = "http://127.0.0.1:8000"
+SERVER_URL = os.environ.get("SERVER_URL", "http://127.0.0.1:8000")
 AGENT_API_KEY = "dummy_agent_key_123"
 HEADERS = {"x-agent-key": AGENT_API_KEY}
 
@@ -115,22 +115,27 @@ def get_available_updates():
                 if in_table and len(line.strip()) > 5:
                     if id_idx != -1 and ver_idx != -1 and avail_idx != -1:
                         # Parse using fixed-width indices
+                        description = line[0:id_idx].strip()
                         package_id = line[id_idx:ver_idx].strip()
+                        current_version = line[ver_idx:avail_idx].strip()
                         available_version = line[avail_idx:].split()[0].strip() # Take the first token after 'Available' column starts
                         if package_id and available_version:
                             updates.append({
                                 "package_name": package_id,
+                                "description": description,
+                                "current_version": current_version,
                                 "new_version": available_version,
                                 "update_type": "software"
                             })
                     else:
                         # Fallback parsing if headers weren't found perfectly
-                        parts = line.split()
+                        import re
+                        parts = re.split(r'\s{2,}', line.strip())
                         if len(parts) >= 3:
-                            # Usually Id is first or second, and Available is second to last
-                            package_id = parts[1] if "." in parts[1] else parts[0]
                             updates.append({
-                                "package_name": package_id,
+                                "package_name": parts[1] if len(parts) > 3 else parts[0],
+                                "description": parts[0],
+                                "current_version": parts[2] if len(parts) > 4 else None,
                                 "new_version": parts[-2] if len(parts) > 3 else parts[-1],
                                 "update_type": "software"
                             })
@@ -189,6 +194,22 @@ def execute_task(task):
                 cmd = ["winget", "upgrade", "--all", "--silent", "--accept-package-agreements", "--accept-source-agreements"]
             subprocess.run(cmd, check=True)
             return "completed", f"Updated {package or 'all packages'}"
+
+    elif task_type == "install_software":
+        package = payload_data.get("package_name")
+        if not package:
+            return "failed", "No package name provided for installation."
+
+        os_name = platform.system()
+        if os_name == "Windows":
+            cmd = ["winget", "install", "--id", package, "--silent", "--accept-package-agreements", "--accept-source-agreements"]
+            try:
+                subprocess.run(cmd, check=True)
+                return "completed", f"Installed {package}"
+            except Exception as e:
+                return "failed", f"Failed to install {package}: {str(e)}"
+        else:
+            return "failed", "Software installation via agent is currently only supported on Windows using winget."
 
     elif task_type == "configure_kopia":
         # Placeholder for real kopia config logic

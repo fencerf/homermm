@@ -27,6 +27,7 @@ class Machine(MachineBase):
 
 class PendingUpdateBase(BaseModel):
     package_name: str
+    description: Optional[str] = None
     current_version: Optional[str] = None
     new_version: Optional[str] = None
     update_type: Optional[str] = "software"
@@ -45,6 +46,7 @@ class PendingUpdate(PendingUpdateBase):
 class AgentTaskBase(BaseModel):
     task_type: str
     payload: str
+    scheduled_for: Optional[datetime] = None
 
 class AgentTaskCreate(AgentTaskBase):
     pass
@@ -55,6 +57,7 @@ class AgentTask(AgentTaskBase):
     status: str
     result_message: Optional[str] = None
     created_at: datetime
+    scheduled_for: Optional[datetime] = None
     completed_at: Optional[datetime] = None
 
     class Config:

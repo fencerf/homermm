@@ -35,6 +35,16 @@ def init_db():
         except Exception:
             pass
 
+        try:
+            conn.execute(text("ALTER TABLE pending_updates ADD COLUMN description TEXT"))
+        except Exception:
+            pass
+
+        try:
+            conn.execute(text("ALTER TABLE agent_tasks ADD COLUMN scheduled_for DATETIME"))
+        except Exception:
+            pass
+
         conn.commit()
 
 def get_db():

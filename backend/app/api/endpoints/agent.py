@@ -47,11 +47,18 @@ def submit_updates(machine_id: int, updates: List[schemas.PendingUpdateCreate], 
     db.commit()
     return {"status": "success"}
 
+from sqlalchemy import or_
+
 @router.get("/{machine_id}/tasks", response_model=List[schemas.AgentTask])
 def get_pending_tasks(machine_id: int, db: Session = Depends(get_db), _: str = Depends(verify_agent_key)):
+    now = datetime.utcnow()
     tasks = db.query(models.AgentTask).filter(
         models.AgentTask.machine_id == machine_id,
-        models.AgentTask.status == "pending"
+        models.AgentTask.status == "pending",
+        or_(
+            models.AgentTask.scheduled_for == None,
+            models.AgentTask.scheduled_for <= now
+        )
     ).all()
 
     # Mark as in progress once fetched
