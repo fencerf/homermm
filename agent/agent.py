@@ -94,25 +94,46 @@ def get_available_updates():
             # Setting encoding parameter to avoid decoding errors on windows
             result = subprocess.run(["winget", "upgrade"], capture_output=True, text=True, encoding="utf-8", errors="ignore")
             lines = result.stdout.split('\n')
-            # Look for the start of the table
+
+            # Look for the start of the table and determine column positions
             in_table = False
+            id_idx = -1
+            ver_idx = -1
+            avail_idx = -1
+
             for line in lines:
-                if line.startswith("Name") and "Id" in line and "Version" in line:
+                if not in_table and line.startswith("Name") and "Id" in line and "Version" in line and "Available" in line:
                     in_table = True
+                    id_idx = line.find("Id")
+                    ver_idx = line.find("Version")
+                    avail_idx = line.find("Available")
                     continue
+
                 if in_table and line.startswith("-"):
                     continue
+
                 if in_table and len(line.strip()) > 5:
-                    parts = line.split()
-                    # Winget columns are separated by spaces. The id is usually the second to last part or the first.
-                    # We'll just grab the ID and mark the version as "winget"
-                    if len(parts) >= 3:
-                        package_id = parts[1] if "." in parts[1] else parts[0]
-                        updates.append({
-                            "package_name": package_id,
-                            "new_version": "winget",
-                            "update_type": "software"
-                        })
+                    if id_idx != -1 and ver_idx != -1 and avail_idx != -1:
+                        # Parse using fixed-width indices
+                        package_id = line[id_idx:ver_idx].strip()
+                        available_version = line[avail_idx:].split()[0].strip() # Take the first token after 'Available' column starts
+                        if package_id and available_version:
+                            updates.append({
+                                "package_name": package_id,
+                                "new_version": available_version,
+                                "update_type": "software"
+                            })
+                    else:
+                        # Fallback parsing if headers weren't found perfectly
+                        parts = line.split()
+                        if len(parts) >= 3:
+                            # Usually Id is first or second, and Available is second to last
+                            package_id = parts[1] if "." in parts[1] else parts[0]
+                            updates.append({
+                                "package_name": package_id,
+                                "new_version": parts[-2] if len(parts) > 3 else parts[-1],
+                                "update_type": "software"
+                            })
         except Exception:
             pass
 
