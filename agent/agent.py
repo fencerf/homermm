@@ -34,24 +34,37 @@ class BufferedServerLogHandler(logging.Handler):
 
 AGENT_VERSION = "1.1.0"
 
-# Parse command line arguments
+# Load optional config.json
+config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+file_config = {}
+if os.path.exists(config_path):
+    try:
+        with open(config_path, "r") as f:
+            file_config = json.load(f)
+    except Exception as e:
+        print(f"Failed to load config.json: {e}")
+
+# Parse command line arguments (using parse_known_args to not crash on win32 service arguments)
 parser = argparse.ArgumentParser(description="HCMS Client Agent")
 parser.add_argument("-s", "--server", type=str, help="Address of the HCMS server (e.g. http://192.168.1.100:8000)")
-parser.add_argument("--log-level", type=str, default=os.environ.get("LOG_LEVEL", "INFO"), help="Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)")
-parser.add_argument("--log-file", type=str, default=os.environ.get("LOG_FILE"), help="Path to log file")
-args = parser.parse_args()
+parser.add_argument("--log-level", type=str, help="Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)")
+parser.add_argument("--log-file", type=str, help="Path to log file")
+args, unknown_args = parser.parse_known_args()
 
-# Configuration
-SERVER_URL = args.server if args.server else os.environ.get("SERVER_URL", "http://127.0.0.1:8000")
-AGENT_API_KEY = os.environ.get("AGENT_API_KEY", "dummy_agent_key_123")
+# Configuration hierarchy: Args > Config File > Environment > Default
+SERVER_URL = args.server or file_config.get("server") or os.environ.get("SERVER_URL", "http://127.0.0.1:8000")
+AGENT_API_KEY = file_config.get("api_key") or os.environ.get("AGENT_API_KEY", "dummy_agent_key_123")
 HEADERS = {"x-agent-key": AGENT_API_KEY}
 MACHINE_ID = None
 
 # Configure Logging
-log_level_num = getattr(logging, args.log_level.upper(), logging.INFO)
+log_level_str = args.log_level or file_config.get("log_level") or os.environ.get("LOG_LEVEL", "INFO")
+log_file_str = args.log_file or file_config.get("log_file") or os.environ.get("LOG_FILE")
+
+log_level_num = getattr(logging, log_level_str.upper(), logging.INFO)
 handlers = [logging.StreamHandler(), BufferedServerLogHandler()]
-if args.log_file:
-    handlers.append(logging.FileHandler(args.log_file))
+if log_file_str:
+    handlers.append(logging.FileHandler(log_file_str))
 
 logging.basicConfig(
     level=log_level_num,
@@ -426,8 +439,15 @@ def execute_task(task):
 
                 logger.info("Agent script updated successfully. Restarting process...")
                 time.sleep(1) # Allow result to be sent back
-                # Exec replaces the current process
-                os.execv(sys.executable, [sys.executable, script_path] + sys.argv[1:])
+
+                if platform.system() == "Windows":
+                    # On Windows, if we are running as a service, os.execv will detach from SCM and the service will crash/stop.
+                    # Exiting cleanly will allow the Windows Service Recovery (if configured) to restart the agent natively.
+                    logger.info("Windows detected. Exiting to allow Service Recovery to restart agent.")
+                    os._exit(0)
+                else:
+                    # Exec replaces the current process natively on Unix
+                    os.execv(sys.executable, [sys.executable, script_path] + sys.argv[1:])
             except Exception as e:
                 logger.error(f"Failed to update agent: {e}")
 
