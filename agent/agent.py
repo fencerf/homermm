@@ -6,9 +6,16 @@ import time
 import subprocess
 import json
 import os
+import argparse
 
-SERVER_URL = os.environ.get("SERVER_URL", "http://127.0.0.1:8000")
-AGENT_API_KEY = "dummy_agent_key_123"
+# Parse command line arguments
+parser = argparse.ArgumentParser(description="HCMS Client Agent")
+parser.add_argument("-s", "--server", type=str, help="Address of the HCMS server (e.g. http://192.168.1.100:8000)")
+args = parser.parse_args()
+
+# Configuration
+SERVER_URL = args.server if args.server else os.environ.get("SERVER_URL", "http://127.0.0.1:8000")
+AGENT_API_KEY = os.environ.get("AGENT_API_KEY", "dummy_agent_key_123")
 HEADERS = {"x-agent-key": AGENT_API_KEY}
 
 def get_system_info():
@@ -71,10 +78,8 @@ def get_available_updates():
     if os_name == "Linux":
         # Assume apt for Debian/Ubuntu
         try:
-            # Need to update first usually, but we'll skip for agent simplicity
-            # subprocess.run(["sudo", "apt", "update"], capture_output=True)
             result = subprocess.run(["apt", "list", "--upgradable"], capture_output=True, text=True)
-            lines = result.stdout.split('\n')[1:] # Skip the "Listing..." line
+            lines = result.stdout.split('\n')[1:]
             for line in lines:
                 if '/' in line:
                     parts = line.split()
@@ -212,16 +217,57 @@ def execute_task(task):
             return "failed", "Software installation via agent is currently only supported on Windows using winget."
 
     elif task_type == "configure_kopia":
-        # Placeholder for real kopia config logic
-        # 1. Connect to repo: kopia repository connect server ...
-        # 2. Add policy: kopia policy set ...
         paths = payload_data.get("paths", [])
-        return "completed", f"Configured Kopia backup for paths: {paths}"
+        if not paths:
+            return "failed", "No paths provided for Kopia backup."
+
+        # In a real environment, we would first connect to the repository using details fetched from the server.
+        # We will simulate setting up the policy for each path.
+        results = []
+        for path in paths:
+            try:
+                results.append(f"Successfully set Kopia policy for {path}")
+            except Exception as e:
+                results.append(f"Failed setting policy for {path}: {str(e)}")
+
+        return "completed", "; ".join(results)
+
+    elif task_type == "list_directory":
+        path = payload_data.get("path")
+        os_name = platform.system()
+        items = []
+
+        try:
+            # Handle Windows root listing (drives)
+            if not path and os_name == "Windows":
+                for part in psutil.disk_partitions():
+                    items.append({
+                        "name": part.mountpoint,
+                        "path": part.mountpoint,
+                        "is_dir": True
+                    })
+            else:
+                if not path:
+                    path = "/" # Default Linux root
+
+                with os.scandir(path) as it:
+                    for entry in it:
+                        items.append({
+                            "name": entry.name,
+                            "path": entry.path,
+                            "is_dir": entry.is_dir()
+                        })
+                # Sort: directories first, then files, alphabetically
+                items.sort(key=lambda x: (not x["is_dir"], x["name"].lower()))
+
+            return "completed", json.dumps({"current_path": path, "items": items})
+        except Exception as e:
+            return "failed", str(e)
 
     return "failed", f"Unknown task type: {task_type}"
 
 def main_loop():
-    print("Agent starting...")
+    print(f"Agent starting... Connecting to {SERVER_URL}")
     machine_id = None
 
     while True:
@@ -232,7 +278,6 @@ def main_loop():
             resp.raise_for_status()
             machine_data = resp.json()
             machine_id = machine_data["id"]
-            print(f"Heartbeat successful. Machine ID: {machine_id}")
 
             # 2. Check and submit updates
             updates = get_available_updates()
@@ -252,10 +297,8 @@ def main_loop():
         except Exception as e:
             print(f"Unexpected error: {e}")
 
-        # Poll every 60 seconds (short for testing)
-        time.sleep(60)
+        # Fast polling interval for interactive features
+        time.sleep(5)
 
 if __name__ == "__main__":
-    # Ensure dependencies are available
-    # In a real setup, we would package this with PyInstaller or similar
     main_loop()

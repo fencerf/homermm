@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Cpu, HardDrive, Database, RefreshCw, Archive } from 'lucide-react';
+import { ArrowLeft, Cpu, HardDrive, Database, RefreshCw, Archive, FolderSearch } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
+import RemoteFileBrowser from '../components/RemoteFileBrowser';
 
 function MachineDetails() {
     const { id } = useParams();
@@ -12,6 +13,7 @@ function MachineDetails() {
     const [installPackageId, setInstallPackageId] = useState("");
     const [scheduleDate, setScheduleDate] = useState("");
     const [actionMessage, setActionMessage] = useState("");
+    const [isBrowserOpen, setIsBrowserOpen] = useState(false);
 
     useEffect(() => {
         const fetchData = async () => {
@@ -82,6 +84,22 @@ function MachineDetails() {
             console.error("Error scheduling Kopia config", error);
         }
     };
+
+    const handleSelectPath = (path) => {
+        setKopiaPaths(prev => prev ? `${prev}, ${path}` : path);
+        setIsBrowserOpen(false);
+    };
+
+    // Attempt to parse kopia config JSON for display
+    let activeKopiaPolicies = [];
+    if (machine && machine.kopia_config) {
+        try {
+             const parsed = JSON.parse(machine.kopia_config);
+             if (Array.isArray(parsed)) activeKopiaPolicies = parsed;
+        } catch (e) {
+             // Fallback to raw string if not JSON array
+        }
+    }
 
     if (!machine) return <div className="p-6">Loading...</div>;
 
@@ -270,14 +288,23 @@ function MachineDetails() {
                             <label className="block text-sm font-medium text-gray-700 mb-1">
                                 Directories to Backup (comma separated)
                             </label>
-                            <input
-                                type="text"
-                                value={kopiaPaths}
-                                onChange={(e) => setKopiaPaths(e.target.value)}
-                                placeholder="e.g. /home/user/Documents, /var/www"
-                                className="w-full px-4 py-2 border rounded-md focus:ring-blue-500 focus:border-blue-500"
-                                required
-                            />
+                            <div className="flex space-x-2">
+                                <input
+                                    type="text"
+                                    value={kopiaPaths}
+                                    onChange={(e) => setKopiaPaths(e.target.value)}
+                                    placeholder="e.g. /home/user/Documents, /var/www"
+                                    className="flex-grow px-4 py-2 border rounded-md focus:ring-blue-500 focus:border-blue-500"
+                                    required
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => setIsBrowserOpen(true)}
+                                    className="bg-gray-200 text-gray-700 px-4 py-2 rounded hover:bg-gray-300 transition-colors flex items-center"
+                                >
+                                    <FolderSearch size={16} className="mr-2" /> Browse
+                                </button>
+                            </div>
                         </div>
                         <button type="submit" className="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700 transition-colors">
                             Push Kopia Config to Agent
@@ -289,14 +316,33 @@ function MachineDetails() {
 
                     {machine.kopia_config && (
                         <div className="mt-6 border-t pt-4">
-                            <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-2">Active Agent Policies (Raw)</h3>
-                            <pre className="bg-gray-50 p-4 rounded text-xs text-gray-800 overflow-auto border border-gray-200 max-h-48">
-                                {machine.kopia_config}
-                            </pre>
+                            <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-2">Active Agent Policies</h3>
+                            {activeKopiaPolicies.length > 0 ? (
+                                <ul className="bg-gray-50 p-4 rounded text-sm text-gray-800 overflow-auto border border-gray-200 max-h-48 space-y-2">
+                                    {activeKopiaPolicies.map((policy, idx) => (
+                                        <li key={idx} className="flex flex-col border-b pb-2 last:border-b-0 last:pb-0">
+                                            <span className="font-semibold">{policy.target?.path || policy.id}</span>
+                                            <span className="text-xs text-gray-500">Retention: {policy.retention?.keepLatest || 'Default'}</span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            ) : (
+                                <pre className="bg-gray-50 p-4 rounded text-xs text-gray-800 overflow-auto border border-gray-200 max-h-48">
+                                    {machine.kopia_config}
+                                </pre>
+                            )}
                         </div>
                     )}
                 </div>
             </div>
+
+            {isBrowserOpen && (
+                <RemoteFileBrowser
+                    machineId={machine.id}
+                    onClose={() => setIsBrowserOpen(false)}
+                    onSelectPath={handleSelectPath}
+                />
+            )}
         </div>
     );
 }
