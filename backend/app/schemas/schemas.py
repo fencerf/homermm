@@ -12,6 +12,7 @@ class MachineBase(BaseModel):
     disk_used: int = 0
     kopia_config: Optional[str] = None
     ip_address: str
+    network_info: Optional[str] = None
 
 class MachineCreate(MachineBase):
     pass

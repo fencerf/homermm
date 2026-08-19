@@ -6,6 +6,7 @@ const RemoteFileBrowser = ({ machineId, onSelectPath, onClose }) => {
     const [currentPath, setCurrentPath] = useState("");
     const [items, setItems] = useState([]);
     const [loading, setLoading] = useState(false);
+    const [connecting, setConnecting] = useState(true);
     const [error, setError] = useState("");
     const pollIntervalRef = useRef(null);
 
@@ -31,7 +32,11 @@ const RemoteFileBrowser = ({ machineId, onSelectPath, onClose }) => {
                 task_type: "start_filebrowser_ws",
                 payload: "{}"
             }).then(() => {
-                 setTimeout(() => loadDirectory(""), 6000); // Wait for agent to connect (it polls every 5s)
+                 // Wait for agent to connect (it polls every 5s)
+                 setTimeout(() => {
+                     setConnecting(false);
+                     loadDirectory("");
+                 }, 8000);
             });
         };
 
@@ -142,9 +147,15 @@ const RemoteFileBrowser = ({ machineId, onSelectPath, onClose }) => {
 
                 {/* Content */}
                 <div className="flex-grow overflow-auto p-2">
-                    {loading ? (
+                    {connecting ? (
+                        <div className="flex flex-col justify-center items-center h-40 text-gray-500">
+                            <RotateCcw className="animate-spin mb-4" size={32} />
+                            <p className="font-semibold text-gray-700">Waking up remote agent...</p>
+                            <p className="text-xs text-gray-400 mt-2 text-center max-w-sm">This may take up to 10 seconds while the agent establishes a secure interactive tunnel.</p>
+                        </div>
+                    ) : loading ? (
                         <div className="flex justify-center items-center h-32 text-gray-500">
-                            <RotateCcw className="animate-spin mr-2" size={20} /> Loading from agent...
+                            <RotateCcw className="animate-spin mr-2" size={20} /> Loading directory...
                         </div>
                     ) : error ? (
                         <div className="p-4 bg-red-50 text-red-700 border border-red-200 rounded m-2">

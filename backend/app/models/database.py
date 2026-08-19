@@ -16,6 +16,7 @@ class Machine(Base):
     disk_total = Column(Integer) # In GB
     disk_used = Column(Integer, default=0) # In GB
     ip_address = Column(String)
+    network_info = Column(Text, nullable=True) # JSON string of network details
     last_seen = Column(DateTime, default=datetime.utcnow)
     is_online = Column(Boolean, default=True)
     kopia_config = Column(Text, nullable=True) # JSON string of kopia policies

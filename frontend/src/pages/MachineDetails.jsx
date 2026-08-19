@@ -118,11 +118,31 @@ function MachineDetails() {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Hardware Info Panel */}
                 <div className="bg-white p-6 rounded-lg shadow-md border border-gray-200">
-                    <h2 className="text-xl font-bold mb-4 border-b pb-2">System Information</h2>
+                    <div className="flex justify-between items-center border-b pb-2 mb-4">
+                        <h2 className="text-xl font-bold">System Information</h2>
+                        <button
+                            onClick={async () => {
+                                try {
+                                    await axios.post(`/api/frontend/machines/${machine.id}/tasks`, {
+                                        task_type: "shutdown_agent",
+                                        payload: "{}"
+                                    });
+                                    setActionMessage("Agent shutdown command sent.");
+                                    setTimeout(() => setActionMessage(""), 3000);
+                                } catch (error) {
+                                    console.error("Failed to shutdown", error);
+                                }
+                            }}
+                            className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-xs rounded shadow"
+                        >
+                            Shutdown Agent
+                        </button>
+                    </div>
                     <div className="space-y-4">
                         <div>
-                            <p className="text-sm text-gray-500 font-semibold uppercase tracking-wider">Hostname</p>
-                            <p className="text-lg">{machine.hostname}</p>
+                            <p className="text-sm text-gray-500 font-semibold uppercase tracking-wider">Hostname / OS</p>
+                            <p className="text-lg font-medium">{machine.hostname}</p>
+                            <p className="text-sm text-gray-600">{machine.os_name} {machine.os_version}</p>
                         </div>
                         <div className="flex items-start">
                             <Cpu className="text-gray-400 mr-3 mt-1" size={20} />
@@ -170,6 +190,19 @@ function MachineDetails() {
                                 </div>
                             </div>
                         </div>
+                        {machine.network_info && (
+                            <div className="pt-4 border-t border-gray-100">
+                                <p className="text-sm text-gray-500 font-semibold uppercase tracking-wider mb-2">Network Interfaces</p>
+                                <div className="text-sm space-y-2 max-h-32 overflow-y-auto">
+                                    {JSON.parse(machine.network_info).map((net, idx) => (
+                                        <div key={idx} className="flex justify-between border-b border-gray-50 pb-1">
+                                            <span className="font-medium text-gray-700">{net.interface}</span>
+                                            <span className="text-gray-500">{net.ip}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
 
