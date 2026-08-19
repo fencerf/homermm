@@ -95,6 +95,23 @@ def get_system_info():
     os_name = platform.system()
     os_version = uname.release
 
+    # Attempt to get patch level / build number
+    if os_name == "Windows":
+        try:
+            # Get specific build number on Windows
+            os_version = f"{uname.release} (Build {uname.version})"
+        except:
+            pass
+    elif os_name == "Linux":
+        try:
+             with open("/etc/os-release") as f:
+                 for line in f:
+                     if line.startswith("PRETTY_NAME="):
+                         os_version = line.split("=")[1].strip().strip('"')
+                         break
+        except:
+             pass
+
     # CPU
     cpu_info = f"{uname.processor} ({psutil.cpu_count(logical=False)} Cores)"
 
@@ -129,6 +146,20 @@ def get_system_info():
     hostname = socket.gethostname()
     ip_address = socket.gethostbyname(hostname)
 
+    network_info = []
+    try:
+        net_if_addrs = psutil.net_if_addrs()
+        for interface_name, interface_addresses in net_if_addrs.items():
+            for address in interface_addresses:
+                if str(address.family) == 'AddressFamily.AF_INET':
+                    network_info.append({
+                        "interface": interface_name,
+                        "ip": address.address,
+                        "netmask": address.netmask
+                    })
+    except Exception as e:
+        logger.warning(f"Failed to get detailed network info: {e}")
+
     return {
         "hostname": hostname,
         "os_name": os_name,
@@ -138,7 +169,8 @@ def get_system_info():
         "disk_total": disk_total,
         "disk_used": disk_used,
         "kopia_config": kopia_config,
-        "ip_address": ip_address
+        "ip_address": ip_address,
+        "network_info": json.dumps(network_info) if network_info else None
     }
 
 def get_available_updates():
@@ -366,9 +398,21 @@ def execute_task(task):
             return "failed", str(e)
 
     elif task_type == "start_filebrowser_ws":
-        # Launching websocket connection in a separate thread
-        threading.Thread(target=interactive_filebrowser_ws, daemon=True).start()
-        return "completed", "WebSocket filebrowser connection established"
+        # Launching websocket connection in a separate thread if one is not already running
+        global WS_THREAD_ACTIVE
+        if not globals().get('WS_THREAD_ACTIVE'):
+             globals()['WS_THREAD_ACTIVE'] = True
+             threading.Thread(target=interactive_filebrowser_ws, daemon=True).start()
+             return "completed", "WebSocket filebrowser connection established"
+        return "completed", "WebSocket filebrowser connection already active"
+
+    elif task_type == "shutdown_agent":
+        logger.info("Received shutdown_agent task. Shutting down in 2 seconds...")
+        def shutdown_process():
+            time.sleep(2)
+            os._exit(0)
+        threading.Thread(target=shutdown_process, daemon=True).start()
+        return "completed", "Agent is shutting down."
 
     return "failed", f"Unknown task type: {task_type}"
 
@@ -421,6 +465,7 @@ def interactive_filebrowser_ws():
 
     def on_close(ws, close_status_code, close_msg):
         logger.info("WebSocket file browser closed")
+        globals()['WS_THREAD_ACTIVE'] = False
 
     def on_open(ws):
         logger.info("WebSocket file browser connected")

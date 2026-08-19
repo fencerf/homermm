@@ -45,6 +45,11 @@ def init_db():
         except Exception:
             pass
 
+        try:
+            conn.execute(text("ALTER TABLE machines ADD COLUMN network_info TEXT"))
+        except Exception:
+            pass
+
         conn.commit()
 
 def get_db():
