@@ -29,6 +29,7 @@ class PendingUpdate(Base):
     id = Column(Integer, primary_key=True, index=True)
     machine_id = Column(Integer, ForeignKey("machines.id"))
     package_name = Column(String, nullable=False)
+    description = Column(String, nullable=True)
     current_version = Column(String)
     new_version = Column(String)
     update_type = Column(String, default="software") # "software" or "os"
@@ -45,6 +46,7 @@ class AgentTask(Base):
     status = Column(String, default="pending") # pending, in_progress, completed, failed
     result_message = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
+    scheduled_for = Column(DateTime, nullable=True)
     completed_at = Column(DateTime)
 
     machine = relationship("Machine", back_populates="tasks")

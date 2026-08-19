@@ -9,6 +9,8 @@ function MachineDetails() {
     const [machine, setMachine] = useState(null);
     const [updates, setUpdates] = useState([]);
     const [kopiaPaths, setKopiaPaths] = useState("");
+    const [installPackageId, setInstallPackageId] = useState("");
+    const [scheduleDate, setScheduleDate] = useState("");
     const [actionMessage, setActionMessage] = useState("");
 
     useEffect(() => {
@@ -29,14 +31,39 @@ function MachineDetails() {
 
     const handleInstallUpdate = async (packageName) => {
         try {
-            await axios.post(`/api/frontend/machines/${id}/tasks`, {
+            const taskData = {
                 task_type: "update_software",
                 payload: JSON.stringify({ package_name: packageName })
-            });
-            setActionMessage(`Task to update ${packageName || 'all packages'} submitted!`);
+            };
+            if (scheduleDate) {
+                taskData.scheduled_for = new Date(scheduleDate).toISOString();
+            }
+            await axios.post(`/api/frontend/machines/${id}/tasks`, taskData);
+            setActionMessage(`Task to update ${packageName || 'all packages'} submitted!${scheduleDate ? ' (Scheduled)' : ''}`);
+            setScheduleDate("");
             setTimeout(() => setActionMessage(""), 3000);
         } catch (error) {
             console.error("Error scheduling update", error);
+        }
+    };
+
+    const handleInstallNewSoftware = async (e) => {
+        e.preventDefault();
+        try {
+            const taskData = {
+                task_type: "install_software",
+                payload: JSON.stringify({ package_name: installPackageId })
+            };
+            if (scheduleDate) {
+                taskData.scheduled_for = new Date(scheduleDate).toISOString();
+            }
+            await axios.post(`/api/frontend/machines/${id}/tasks`, taskData);
+            setActionMessage(`Task to install ${installPackageId} submitted!${scheduleDate ? ' (Scheduled)' : ''}`);
+            setInstallPackageId("");
+            setScheduleDate("");
+            setTimeout(() => setActionMessage(""), 3000);
+        } catch (error) {
+            console.error("Error scheduling install", error);
         }
     };
 
@@ -140,6 +167,17 @@ function MachineDetails() {
                         </button>
                     </div>
 
+                    <div className="mb-4 flex items-center space-x-4 bg-blue-50 p-3 rounded">
+                        <label className="text-sm font-medium text-blue-800">Schedule Task (Optional):</label>
+                        <input
+                            type="datetime-local"
+                            value={scheduleDate}
+                            onChange={(e) => setScheduleDate(e.target.value)}
+                            className="px-3 py-1 border border-blue-200 rounded text-sm focus:ring-blue-500"
+                        />
+                        {scheduleDate && <button onClick={() => setScheduleDate("")} className="text-xs text-red-500 hover:text-red-700">Clear</button>}
+                    </div>
+
                     {updates.length === 0 ? (
                         <p className="text-gray-500 italic">No updates available or agent hasn't reported yet.</p>
                     ) : (
@@ -152,6 +190,7 @@ function MachineDetails() {
                                         <thead className="uppercase tracking-wider border-b-2 border-gray-200">
                                             <tr>
                                                 <th className="px-4 py-2 font-medium text-gray-500">Package</th>
+                                                <th className="px-4 py-2 font-medium text-gray-500">Current</th>
                                                 <th className="px-4 py-2 font-medium text-gray-500">New Version</th>
                                                 <th className="px-4 py-2 font-medium text-gray-500">Action</th>
                                             </tr>
@@ -159,8 +198,9 @@ function MachineDetails() {
                                         <tbody>
                                             {updates.filter(u => u.update_type === 'software').map((update, idx) => (
                                                 <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
-                                                    <td className="px-4 py-2 font-medium text-gray-900">{update.package_name}</td>
-                                                    <td className="px-4 py-2 text-gray-500">{update.new_version}</td>
+                                                    <td className="px-4 py-2 font-medium text-gray-900" title={update.description}>{update.package_name}</td>
+                                                    <td className="px-4 py-2 text-gray-500">{update.current_version || '-'}</td>
+                                                    <td className="px-4 py-2 text-blue-600 font-semibold">{update.new_version}</td>
                                                     <td className="px-4 py-2">
                                                         <button
                                                             onClick={() => handleInstallUpdate(update.package_name)}
@@ -175,6 +215,24 @@ function MachineDetails() {
                                     </table>
                                 </div>
                             )}
+
+                            {/* Install New Software Form */}
+                            <div className="pt-4 border-t">
+                                <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-2">Install New Software (Winget)</h3>
+                                <form onSubmit={handleInstallNewSoftware} className="flex space-x-2">
+                                    <input
+                                        type="text"
+                                        value={installPackageId}
+                                        onChange={(e) => setInstallPackageId(e.target.value)}
+                                        placeholder="Enter Winget Package ID (e.g. Mozilla.Firefox)"
+                                        className="flex-grow px-3 py-1.5 border rounded text-sm focus:ring-blue-500"
+                                        required
+                                    />
+                                    <button type="submit" className="bg-blue-600 text-white px-4 py-1.5 rounded text-sm hover:bg-blue-700">
+                                        Install
+                                    </button>
+                                </form>
+                            </div>
 
                             {/* OS Updates */}
                             {updates.filter(u => u.update_type === 'os').length > 0 && (
