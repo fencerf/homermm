@@ -9,50 +9,74 @@ const RemoteFileBrowser = ({ machineId, onSelectPath, onClose }) => {
     const [error, setError] = useState("");
     const pollIntervalRef = useRef(null);
 
-    const loadDirectory = async (path) => {
+    const wsRef = useRef(null);
+    const reconnectTimeoutRef = useRef(null);
+    const isUnmountedRef = useRef(false);
+
+    const connectWebSocket = () => {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        // Need absolute URL since proxy doesn't handle wss normally for non-vite paths easily
+        // Assuming development vs production
+        const host = import.meta.env.DEV ? window.location.host : window.location.host;
+        const token = localStorage.getItem('token');
+        const wsUrl = `${protocol}//${host}/api/frontend/machines/${machineId}/ws?token=${token}`;
+
+        wsRef.current = new WebSocket(wsUrl);
+
+        wsRef.current.onopen = () => {
+            console.log("WebSocket connected");
+            // First time, start agent ws loop if not already running via task,
+            // then request root directory
+            axios.post(`/api/frontend/machines/${machineId}/tasks`, {
+                task_type: "start_filebrowser_ws",
+                payload: "{}"
+            }).then(() => {
+                 setTimeout(() => loadDirectory(""), 6000); // Wait for agent to connect (it polls every 5s)
+            });
+        };
+
+        wsRef.current.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if (data.type === "directory_result") {
+                setCurrentPath(data.current_path || "");
+                setItems(data.items);
+                setLoading(false);
+            } else if (data.type === "directory_error" || data.type === "error") {
+                setError(`Failed to list directory: ${data.error}`);
+                setLoading(false);
+            }
+        };
+
+        wsRef.current.onerror = (err) => {
+            console.error("WebSocket error", err);
+            setError("WebSocket error occurred.");
+        };
+
+        wsRef.current.onclose = () => {
+            if (!isUnmountedRef.current) {
+                console.log("WebSocket disconnected. Reconnecting in 5s...");
+                reconnectTimeoutRef.current = setTimeout(connectWebSocket, 5000);
+            }
+        };
+    };
+
+    const loadDirectory = (path) => {
         setLoading(true);
         setError("");
-        setItems([]);
-
-        try {
-            // 1. Create task
-            const taskRes = await axios.post(`/api/frontend/machines/${machineId}/tasks`, {
-                task_type: "list_directory",
-                payload: JSON.stringify({ path: path })
-            });
-            const taskId = taskRes.data.id;
-
-            // 2. Poll for completion
-            pollIntervalRef.current = setInterval(async () => {
-                try {
-                    const statusRes = await axios.get(`/api/frontend/machines/${machineId}/tasks/${taskId}`);
-                    if (statusRes.data.status === "completed") {
-                        clearInterval(pollIntervalRef.current);
-                        const result = JSON.parse(statusRes.data.result_message);
-                        setCurrentPath(result.current_path || "");
-                        setItems(result.items);
-                        setLoading(false);
-                    } else if (statusRes.data.status === "failed") {
-                        clearInterval(pollIntervalRef.current);
-                        setError(statusRes.data.result_message || "Failed to load directory.");
-                        setLoading(false);
-                    }
-                } catch (pollErr) {
-                    console.error("Poll error:", pollErr);
-                }
-            }, 1000); // Poll every 1 second
-
-        } catch (err) {
-            console.error("Request error:", err);
-            setError("Failed to request directory listing.");
-            setLoading(false);
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({ type: "list_directory", path, req_id: Date.now().toString() }));
+        } else {
+             setError("WebSocket not connected.");
+             setLoading(false);
         }
     };
 
     useEffect(() => {
-        loadDirectory(""); // Load root
+        connectWebSocket();
         return () => {
-            if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+            isUnmountedRef.current = true;
+            if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+            if (wsRef.current) wsRef.current.close();
         };
     }, [machineId]);
 

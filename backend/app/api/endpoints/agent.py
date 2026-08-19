@@ -7,10 +7,15 @@ import json
 from app.core.database import get_db
 from app.models import database as models
 from app.schemas import schemas
+from app.core.logging_db import get_log_engine, AgentLog
+from app.core.websocket_manager import manager
+from fastapi import WebSocket, WebSocketDisconnect
+
+import os
 
 router = APIRouter()
 
-AGENT_API_KEY = "dummy_agent_key_123" # Hardcoded for now, could be in env vars
+AGENT_API_KEY = os.environ.get("AGENT_API_KEY", "dummy_agent_key_123")
 
 def verify_agent_key(x_agent_key: str = Header(...)):
     if x_agent_key != AGENT_API_KEY:
@@ -33,6 +38,25 @@ def register_machine(machine: schemas.MachineCreate, db: Session = Depends(get_d
     db.commit()
     db.refresh(db_machine)
     return db_machine
+
+@router.post("/{machine_id}/logs")
+def submit_logs(machine_id: int, batch: schemas.AgentLogsBatch, db: Session = Depends(get_db), _: str = Depends(verify_agent_key)):
+    machine = db.query(models.Machine).filter(models.Machine.id == machine_id).first()
+    if not machine:
+        raise HTTPException(status_code=404, detail="Machine not found")
+
+    LogSession = get_log_engine(machine_id)
+    with LogSession() as log_db:
+        for log in batch.logs:
+            new_log = AgentLog(
+                timestamp=log.timestamp,
+                level=log.level,
+                message=log.message,
+                module=log.module
+            )
+            log_db.add(new_log)
+        log_db.commit()
+    return {"status": "success"}
 
 @router.post("/{machine_id}/updates")
 def submit_updates(machine_id: int, updates: List[schemas.PendingUpdateCreate], db: Session = Depends(get_db), _: str = Depends(verify_agent_key)):
@@ -68,6 +92,22 @@ def get_pending_tasks(machine_id: int, db: Session = Depends(get_db), _: str = D
         db.commit()
 
     return tasks
+
+from fastapi import Query
+
+@router.websocket("/{machine_id}/ws")
+async def websocket_agent_endpoint(websocket: WebSocket, machine_id: int, token: str = Query(None)):
+    if token != AGENT_API_KEY:
+        await websocket.close(code=1008)
+        return
+    await manager.connect_agent(websocket, machine_id)
+    try:
+        while True:
+            data = await websocket.receive_json()
+            # Relay incoming data from the agent to connected frontends
+            await manager.relay_to_frontends(machine_id, data)
+    except WebSocketDisconnect:
+        manager.disconnect_agent(machine_id)
 
 @router.post("/{machine_id}/tasks/{task_id}/result")
 def submit_task_result(machine_id: int, task_id: int, status: str, result_message: Optional[str] = None, db: Session = Depends(get_db), _: str = Depends(verify_agent_key)):
