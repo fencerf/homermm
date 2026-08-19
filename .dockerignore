@@ -1,0 +1,15 @@
+# Dependencies
+node_modules/
+venv/
+backend/venv/
+agent/venv/
+
+# Environment and secrets
+.env
+.git/
+
+# Cache and build artifacts
+__pycache__/
+*.pyc
+frontend/dist/
+backend/static/

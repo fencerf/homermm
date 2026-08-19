@@ -1,0 +1,13 @@
+venv/
+__pycache__/
+*.pyc
+node_modules/
+.env
+dist/
+build/
+*.db
+agent/venv/
+backend/static/
+*.log
+frontend/dist/
+node_modules/
