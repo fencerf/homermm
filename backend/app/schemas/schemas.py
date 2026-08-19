@@ -13,6 +13,7 @@ class MachineBase(BaseModel):
     kopia_config: Optional[str] = None
     ip_address: str
     network_info: Optional[str] = None
+    agent_version: Optional[str] = None
 
 class MachineCreate(MachineBase):
     pass

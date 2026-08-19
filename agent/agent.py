@@ -11,6 +11,8 @@ import logging
 import threading
 from datetime import datetime
 import websocket
+import signal
+import sys
 
 # Logging setup
 log_buffer = []
@@ -29,6 +31,8 @@ class BufferedServerLogHandler(logging.Handler):
                 log_buffer.append(log_entry)
         except Exception:
             self.handleError(record)
+
+AGENT_VERSION = "1.1.0"
 
 # Parse command line arguments
 parser = argparse.ArgumentParser(description="HCMS Client Agent")
@@ -170,7 +174,8 @@ def get_system_info():
         "disk_used": disk_used,
         "kopia_config": kopia_config,
         "ip_address": ip_address,
-        "network_info": json.dumps(network_info) if network_info else None
+        "network_info": json.dumps(network_info) if network_info else None,
+        "agent_version": AGENT_VERSION
     }
 
 def get_available_updates():
@@ -406,13 +411,28 @@ def execute_task(task):
              return "completed", "WebSocket filebrowser connection established"
         return "completed", "WebSocket filebrowser connection already active"
 
-    elif task_type == "shutdown_agent":
-        logger.info("Received shutdown_agent task. Shutting down in 2 seconds...")
-        def shutdown_process():
-            time.sleep(2)
-            os._exit(0)
-        threading.Thread(target=shutdown_process, daemon=True).start()
-        return "completed", "Agent is shutting down."
+    elif task_type == "update_agent":
+        logger.info("Received update_agent task. Downloading new script...")
+
+        def do_update():
+            try:
+                resp = requests.get(f"{SERVER_URL}/api/agent/download", headers=HEADERS)
+                resp.raise_for_status()
+
+                # Write to self
+                script_path = os.path.abspath(__file__)
+                with open(script_path, "w") as f:
+                    f.write(resp.text)
+
+                logger.info("Agent script updated successfully. Restarting process...")
+                time.sleep(1) # Allow result to be sent back
+                # Exec replaces the current process
+                os.execv(sys.executable, [sys.executable, script_path] + sys.argv[1:])
+            except Exception as e:
+                logger.error(f"Failed to update agent: {e}")
+
+        threading.Thread(target=do_update, daemon=True).start()
+        return "completed", "Agent is downloading update and restarting."
 
     return "failed", f"Unknown task type: {task_type}"
 
@@ -480,8 +500,16 @@ def interactive_filebrowser_ws():
 
     ws.run_forever()
 
+def handle_exit_signal(signum, frame):
+    logger.info(f"Received signal {signum}. Gracefully shutting down...")
+    sys.exit(0)
+
 def main_loop():
     global MACHINE_ID
+
+    signal.signal(signal.SIGINT, handle_exit_signal)
+    signal.signal(signal.SIGTERM, handle_exit_signal)
+
     logger.info(f"Agent starting... Connecting to {SERVER_URL}")
 
     while True:

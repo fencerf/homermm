@@ -10,7 +10,9 @@ from app.core.logging_db import log_audit_action, get_log_engine, AgentLog, Audi
 from app.models import database as models
 from app.schemas import schemas
 from app.core.websocket_manager import manager
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import WebSocket, WebSocketDisconnect, Query
+from fastapi.responses import FileResponse
+import re
 
 router = APIRouter()
 
@@ -99,6 +101,34 @@ def get_machine_audit_logs(machine_id: int, db: Session = Depends(get_db), _: st
     LogSession = get_log_engine(machine_id)
     with LogSession() as log_db:
         return log_db.query(AuditLog).order_by(AuditLog.timestamp.desc()).limit(100).all()
+
+def get_agent_path():
+    # Dev path (host machine) vs Docker path
+    dev_path = os.path.join(os.path.dirname(__file__), "../../../../agent/agent.py")
+    prod_path = os.path.join(os.path.dirname(__file__), "../../../agent/agent.py") # /app/app/api/endpoints -> /app/agent/agent.py
+    if os.path.exists(prod_path):
+        return prod_path
+    return dev_path
+
+@router.get("/agent/version")
+def get_latest_agent_version(_: str = Depends(verify_admin)):
+    agent_path = get_agent_path()
+    try:
+        with open(agent_path, "r") as f:
+            content = f.read()
+            match = re.search(r'AGENT_VERSION\s*=\s*["\']([^"\']+)["\']', content)
+            if match:
+                return {"version": match.group(1)}
+    except Exception as e:
+        pass
+    return {"version": "unknown"}
+
+@router.get("/agent/download")
+def download_agent_frontend(_: str = Depends(verify_admin)):
+    agent_path = get_agent_path()
+    if not os.path.exists(agent_path):
+        raise HTTPException(status_code=404, detail="Agent file not found")
+    return FileResponse(agent_path, filename="agent.py")
 
 @router.get("/settings", response_model=List[schemas.GlobalSettings])
 def get_settings(db: Session = Depends(get_db), _: str = Depends(verify_admin)):

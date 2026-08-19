@@ -22,6 +22,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy backend source
 COPY backend/app ./app
 
+# Copy agent source so it can be served/downloaded
+COPY agent ./agent
+
 # Copy compiled frontend from Stage 1 to serve statically
 COPY --from=frontend-builder /app/frontend/dist ./static
 
