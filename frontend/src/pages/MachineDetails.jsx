@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Cpu, HardDrive, Database, RefreshCw, Archive, FolderSearch } from 'lucide-react';
+import { ArrowLeft, Cpu, HardDrive, Database, RefreshCw, Archive, FolderSearch, Terminal } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import RemoteFileBrowser from '../components/RemoteFileBrowser';
+import MachineLogsModal from '../components/MachineLogsModal';
 
 function MachineDetails() {
     const { id } = useParams();
@@ -14,6 +15,7 @@ function MachineDetails() {
     const [scheduleDate, setScheduleDate] = useState("");
     const [actionMessage, setActionMessage] = useState("");
     const [isBrowserOpen, setIsBrowserOpen] = useState(false);
+    const [isLogsOpen, setIsLogsOpen] = useState(false);
     const [latestAgentVersion, setLatestAgentVersion] = useState("");
 
     useEffect(() => {
@@ -123,9 +125,16 @@ function MachineDetails() {
                 <div className="bg-white p-6 rounded-lg shadow-md border border-gray-200">
                     <div className="flex justify-between items-center border-b pb-2 mb-4">
                         <h2 className="text-xl font-bold">System Information</h2>
-                        {latestAgentVersion !== "unknown" && machine.agent_version !== latestAgentVersion && (
+                        <div className="flex space-x-2">
                             <button
-                                onClick={async () => {
+                                onClick={() => setIsLogsOpen(true)}
+                                className="px-3 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 text-xs rounded shadow flex items-center"
+                            >
+                                <Terminal size={14} className="mr-1"/> Logs
+                            </button>
+                            {latestAgentVersion !== "unknown" && machine.agent_version !== latestAgentVersion && (
+                                <button
+                                    onClick={async () => {
                                     try {
                                         await axios.post(`/api/frontend/machines/${machine.id}/tasks`, {
                                             task_type: "update_agent",
@@ -138,10 +147,11 @@ function MachineDetails() {
                                     }
                                 }}
                                 className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded shadow"
-                            >
-                                Update Agent to v{latestAgentVersion}
-                            </button>
-                        )}
+                                >
+                                    Update Agent to v{latestAgentVersion}
+                                </button>
+                            )}
+                        </div>
                     </div>
                     <div className="space-y-4">
                         <div className="flex justify-between items-start">
@@ -387,6 +397,13 @@ function MachineDetails() {
                     machineId={machine.id}
                     onClose={() => setIsBrowserOpen(false)}
                     onSelectPath={handleSelectPath}
+                />
+            )}
+
+            {isLogsOpen && (
+                <MachineLogsModal
+                    machineId={machine.id}
+                    onClose={() => setIsLogsOpen(false)}
                 />
             )}
         </div>
