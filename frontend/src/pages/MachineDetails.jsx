@@ -123,7 +123,8 @@ function MachineDetails() {
             if (scheduleDate) {
                 taskData.scheduled_for = new Date(scheduleDate).toISOString();
             }
-            await axios.post(`/api/frontend/machines/${id}/tasks`, taskData);
+            const res = await axios.post(`/api/frontend/machines/${id}/tasks`, taskData);
+            setActiveTasks(prev => [...prev, res.data.id]);
             setActionMessage(`Task to install ${installPackageId} submitted!${scheduleDate ? ' (Scheduled)' : ''}`);
             setInstallPackageId("");
             setScheduleDate("");
