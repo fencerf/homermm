@@ -13,6 +13,7 @@ from datetime import datetime
 import websocket
 import signal
 import sys
+import shutil
 
 # Thread-local storage to track the current action ID
 local_data = threading.local()
@@ -36,7 +37,27 @@ class BufferedServerLogHandler(logging.Handler):
         except Exception:
             self.handleError(record)
 
-AGENT_VERSION = "1.1.1"
+AGENT_VERSION = "1.1.2"
+
+def get_kopia_cmd():
+    # If the user explicitly provided a path in config.json
+    if file_config.get("kopia_path"):
+        return file_config.get("kopia_path")
+
+    # Check if 'kopia' is in the system PATH
+    if shutil.which("kopia"):
+        return "kopia"
+
+    # Check common KopiaUI installation directories on Windows
+    if platform.system() == "Windows":
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if local_app_data:
+            # KopiaUI bundles kopia.exe inside its resources directory
+            kopia_ui_path = os.path.join(local_app_data, "Programs", "KopiaUI", "resources", "server", "kopia.exe")
+            if os.path.exists(kopia_ui_path):
+                return kopia_ui_path
+
+    return "kopia" # Fallback to default
 
 # Load optional config.json
 config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
@@ -156,26 +177,18 @@ def get_system_info():
     # Kopia Policies
     kopia_config = None
     try:
+        kopia_cmd = get_kopia_cmd()
         # Fetch active kopia policies if kopia is installed and connected
         # Since Kopia requires connection context, we will run the list command.
         # In a real environment, it assumes the agent is connected.
         # Fallback to simulated data if kopia CLI is not found or errors (for home deployment tests).
-        result = subprocess.run(["kopia", "policy", "list", "--json"], capture_output=True, text=True)
+        result = subprocess.run([kopia_cmd, "policy", "list", "--json"], capture_output=True, text=True)
         if result.returncode == 0:
             kopia_config = result.stdout
         else:
              kopia_config = "[]"
     except Exception:
-        # Provide mock data for UI testing if CLI missing entirely
-        kopia_config = json.dumps([{
-            "id": "mock_policy_123",
-            "target": {
-              "path": "/home/user/Documents"
-            },
-            "retentionPolicy": {
-              "keepLatest": 10
-            }
-        }])
+        kopia_config = "[]"
 
     # Network
     hostname = socket.gethostname()
@@ -407,8 +420,9 @@ def execute_task(task):
 
             fingerprint = kopia_settings.get("kopia_server_cert_fingerprint", "")
 
+            kopia_cmd = get_kopia_cmd()
             connect_cmd = [
-                "kopia", "repository", "connect", "server",
+                kopia_cmd, "repository", "connect", "server",
                 "--url", kopia_settings.get("kopia_server_url", "https://localhost:51515"),
                 "--override-username", "admin",
                 "--override-hostname", socket.gethostname(),
@@ -417,15 +431,18 @@ def execute_task(task):
             if fingerprint:
                 connect_cmd.extend(["--server-cert-fingerprint", fingerprint])
 
+            logger.info(f"Connecting to Kopia server with command: {' '.join(connect_cmd[:-1])} --password ***")
             subprocess.run(connect_cmd, check=True, capture_output=True, text=True)
 
             results = []
             for path in paths:
                 try:
-                    subprocess.run(["kopia", "policy", "set", path, "--add-include", path], check=True, capture_output=True, text=True)
+                    subprocess.run([kopia_cmd, "policy", "set", path, "--add-include", path], check=True, capture_output=True, text=True)
                     results.append(f"Successfully set Kopia policy for {path}")
+                    logger.info(f"Set kopia policy for {path}")
                 except subprocess.CalledProcessError as e:
                     results.append(f"Failed setting policy for {path}: {e.stderr}")
+                    logger.error(f"Failed setting Kopia policy: {e.stderr}")
 
             return "completed", "; ".join(results)
         except subprocess.CalledProcessError as e:
