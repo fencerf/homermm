@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Link } from 'react-router-dom';
-import { Server, Monitor, Clock } from 'lucide-react';
+import { Server, Monitor, Clock, AlertTriangle, Download } from 'lucide-react';
 import { fetchServerTimezone, formatTime } from '../utils/timezone';
 
 function Dashboard() {
@@ -60,7 +60,19 @@ function Dashboard() {
                                     <Monitor className="text-blue-500" size={24} />
                                     <h2 className="text-xl font-semibold text-gray-800">{machine.hostname}</h2>
                                 </div>
-                                <div className={`w-3 h-3 rounded-full ${machine.is_online ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                                <div className="flex items-center space-x-3">
+                                    {machine.pending_os_updates > 0 && (
+                                        <div className="flex items-center text-red-600 animate-pulse" title={`${machine.pending_os_updates} OS Update(s) Pending`}>
+                                            <AlertTriangle size={18} />
+                                        </div>
+                                    )}
+                                    {machine.pending_software_updates > 0 && (
+                                        <div className="flex items-center text-yellow-500" title={`${machine.pending_software_updates} Software Update(s) Pending`}>
+                                            <Download size={18} />
+                                        </div>
+                                    )}
+                                    <div className={`w-3 h-3 rounded-full ${machine.is_online ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                                </div>
                             </div>
 
                             <div className="space-y-2 text-sm text-gray-600">

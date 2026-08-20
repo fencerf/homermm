@@ -22,6 +22,8 @@ class Machine(MachineBase):
     id: int
     last_seen: datetime
     is_online: bool
+    pending_software_updates: Optional[int] = 0
+    pending_os_updates: Optional[int] = 0
 
     class Config:
         orm_mode = True

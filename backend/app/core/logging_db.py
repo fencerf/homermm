@@ -62,9 +62,22 @@ def get_log_db(machine_id: int):
     finally:
         db.close()
 
+def enforce_log_retention(machine_id: int):
+    retention_days = int(os.environ.get("LOG_RETENTION_DAYS", "15"))
+    cutoff_date = datetime.datetime.utcnow() - datetime.timedelta(days=retention_days)
+
+    SessionLocal = get_log_engine(machine_id)
+    with SessionLocal() as db:
+        db.query(AgentLog).filter(AgentLog.timestamp < cutoff_date).delete()
+        db.query(AuditLog).filter(AuditLog.timestamp < cutoff_date).delete()
+        db.commit()
+
 def log_audit_action(machine_id: int, action: str, user: str, details: str, action_id: str = None):
     SessionLocal = get_log_engine(machine_id)
     with SessionLocal() as db:
         new_log = AuditLog(action=action, user=user, details=details, action_id=action_id)
         db.add(new_log)
         db.commit()
+
+    # Enforce retention on new audits as well
+    enforce_log_retention(machine_id)

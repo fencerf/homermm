@@ -277,6 +277,11 @@ function MachineDetails() {
                                         <p><span className="inline-block w-3 h-3 bg-red-500 rounded-full mr-1"></span> Used: {machine.disk_used} GB</p>
                                         <p><span className="inline-block w-3 h-3 bg-gray-200 rounded-full mr-1"></span> Free: {machine.disk_total - machine.disk_used} GB</p>
                                         <p className="mt-1 text-xs text-gray-400">Total: {machine.disk_total} GB</p>
+                                        {machine.disk_total > 0 && ((machine.disk_total - machine.disk_used) / machine.disk_total) < 0.1 && (
+                                            <p className="mt-2 text-xs font-bold text-red-600 bg-red-50 p-1 rounded border border-red-200">
+                                                Warning: Low Disk Space
+                                            </p>
+                                        )}
                                     </div>
                                 </div>
                             </div>
@@ -458,7 +463,7 @@ function MachineDetails() {
                                     {activeKopiaPolicies.map((policy, idx) => (
                                         <li key={idx} className="flex flex-col border-b pb-2 last:border-b-0 last:pb-0">
                                             <span className="font-semibold">{policy.target?.path || policy.id}</span>
-                                            <span className="text-xs text-gray-500">Retention: {policy.retention?.keepLatest || 'Default'}</span>
+                                            <span className="text-xs text-gray-500">Retention: {policy.retentionPolicy?.keepLatest || policy.retention?.keepLatest || 'Default'} latest</span>
                                         </li>
                                     ))}
                                 </ul>

@@ -7,7 +7,7 @@ import json
 from app.core.database import get_db
 from app.models import database as models
 from app.schemas import schemas
-from app.core.logging_db import get_log_engine, AgentLog
+from app.core.logging_db import get_log_engine, AgentLog, enforce_log_retention
 from app.core.websocket_manager import manager
 from fastapi import WebSocket, WebSocketDisconnect
 
@@ -68,10 +68,13 @@ def submit_logs(machine_id: int, batch: schemas.AgentLogsBatch, db: Session = De
                 timestamp=log.timestamp,
                 level=log.level,
                 message=log.message,
-                module=log.module
+                module=log.module,
+                action_id=log.action_id
             )
             log_db.add(new_log)
         log_db.commit()
+
+    enforce_log_retention(machine_id)
     return {"status": "success"}
 
 @router.post("/{machine_id}/updates")
