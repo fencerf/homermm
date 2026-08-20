@@ -6,7 +6,7 @@ import os
 import json
 
 from app.core.database import get_db
-from app.core.logging_db import log_audit_action, get_log_engine, AgentLog, AuditLog
+from app.core.logging_db import log_audit_action, get_log_engine, AgentLog, AuditLog, LOG_DB_DIR
 from app.models import database as models
 from app.schemas import schemas
 from app.core.websocket_manager import manager
@@ -28,7 +28,23 @@ def verify_admin(authorization: str = Header(None)):
 
 @router.get("/machines", response_model=List[schemas.Machine])
 def get_machines(db: Session = Depends(get_db), _: str = Depends(verify_admin)):
-    return db.query(models.Machine).all()
+    machines = db.query(models.Machine).all()
+    results = []
+    for machine in machines:
+        software_updates = db.query(models.PendingUpdate).filter(
+            models.PendingUpdate.machine_id == machine.id,
+            models.PendingUpdate.update_type == 'software'
+        ).count()
+        os_updates = db.query(models.PendingUpdate).filter(
+            models.PendingUpdate.machine_id == machine.id,
+            models.PendingUpdate.update_type == 'os'
+        ).count()
+
+        m_dict = schemas.Machine.model_validate(machine).model_dump()
+        m_dict['pending_software_updates'] = software_updates
+        m_dict['pending_os_updates'] = os_updates
+        results.append(m_dict)
+    return results
 
 @router.get("/machines/{machine_id}", response_model=schemas.Machine)
 def get_machine(machine_id: int, db: Session = Depends(get_db), _: str = Depends(verify_admin)):
@@ -102,6 +118,18 @@ def get_machine_audit_logs(machine_id: int, db: Session = Depends(get_db), _: st
     LogSession = get_log_engine(machine_id)
     with LogSession() as log_db:
         return log_db.query(AuditLog).order_by(AuditLog.timestamp.desc()).limit(100).all()
+
+@router.get("/machines/{machine_id}/logs/size")
+def get_machine_logs_size(machine_id: int, db: Session = Depends(get_db), _: str = Depends(verify_admin)):
+    machine = db.query(models.Machine).filter(models.Machine.id == machine_id).first()
+    if not machine:
+        raise HTTPException(status_code=404, detail="Machine not found")
+
+    db_path = os.path.join(LOG_DB_DIR, f"logs_machine_{machine_id}.db")
+    size_kb = 0
+    if os.path.exists(db_path):
+        size_kb = os.path.getsize(db_path) / 1024.0
+    return {"size_kb": size_kb}
 
 @router.get("/machines/{machine_id}/actions")
 def get_machine_actions(machine_id: int, db: Session = Depends(get_db), _: str = Depends(verify_admin)):

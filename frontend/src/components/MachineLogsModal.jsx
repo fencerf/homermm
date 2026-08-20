@@ -7,6 +7,7 @@ const MachineLogsModal = ({ machineId, onClose }) => {
     const [activeTab, setActiveTab] = useState('actions'); // 'actions', 'agent' or 'audit'
     const [logs, setLogs] = useState([]);
     const [actionsData, setActionsData] = useState([]);
+    const [dbSizeKb, setDbSizeKb] = useState(0);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
 
@@ -20,6 +21,9 @@ const MachineLogsModal = ({ machineId, onClose }) => {
         setLoading(true);
         setError("");
         try {
+            const sizeResponse = await axios.get(`/api/frontend/machines/${machineId}/logs/size`);
+            setDbSizeKb(sizeResponse.data.size_kb);
+
             if (activeTab === 'actions') {
                 const response = await axios.get(`/api/frontend/machines/${machineId}/actions`);
                 setActionsData(response.data);
@@ -258,7 +262,11 @@ const MachineLogsModal = ({ machineId, onClose }) => {
                 </div>
 
                 {/* Footer */}
-                <div className="p-3 bg-gray-50 border-t flex justify-end">
+                <div className="p-3 bg-gray-50 border-t flex justify-between items-center">
+                     <span className={`text-xs ${dbSizeKb > 500 * 1024 ? 'text-red-500 font-bold' : 'text-gray-400'}`}>
+                         Log DB Size on Disk: {(dbSizeKb / 1024).toFixed(2)} MB
+                         {dbSizeKb > 500 * 1024 && " (Warning: Log database is exceeding 500MB. Consider lowering retention days.)"}
+                     </span>
                      <span className="text-xs text-gray-500">
                          {activeTab === 'actions' ? `Showing last ${actionsData.length} actions.` : `Showing ${filteredLogs.length} entries.`}
                      </span>
