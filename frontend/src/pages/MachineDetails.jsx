@@ -17,6 +17,7 @@ function MachineDetails() {
     const [isBrowserOpen, setIsBrowserOpen] = useState(false);
     const [isLogsOpen, setIsLogsOpen] = useState(false);
     const [latestAgentVersion, setLatestAgentVersion] = useState("");
+    const [activeTasks, setActiveTasks] = useState([]);
 
     useEffect(() => {
         const fetchData = async () => {
@@ -34,7 +35,49 @@ function MachineDetails() {
             }
         };
         fetchData();
+
+        // Poll to refresh updates and track active task status
+        const pollUpdatesAndTasks = async () => {
+             try {
+                const updatesRes = await axios.get(`/api/frontend/machines/${id}/updates`);
+                setUpdates(updatesRes.data);
+             } catch (e) {}
+        };
+
+        const taskInterval = setInterval(pollUpdatesAndTasks, 5000);
+        return () => clearInterval(taskInterval);
     }, [id]);
+
+    // Manage active tasks polling properly outside of the interval
+    useEffect(() => {
+        if (activeTasks.length === 0) return;
+
+        const checkActiveTasks = async () => {
+            let updatedTasks = [...activeTasks];
+            let completedAny = false;
+            let finalMessage = "";
+            for (let taskId of activeTasks) {
+                try {
+                    const statusRes = await axios.get(`/api/frontend/machines/${id}/tasks/${taskId}`);
+                    if (statusRes.data.status === 'completed' || statusRes.data.status === 'failed') {
+                        updatedTasks = updatedTasks.filter(t => t !== taskId);
+                        completedAny = true;
+                        finalMessage = statusRes.data.status === 'completed'
+                            ? `Task completed successfully: ${statusRes.data.result_message}`
+                            : `Task failed: ${statusRes.data.result_message}`;
+                    }
+                } catch(e) {}
+            }
+            if (completedAny) {
+                 setActiveTasks(updatedTasks);
+                 setActionMessage(finalMessage);
+                 setTimeout(() => setActionMessage(""), 5000);
+            }
+        };
+
+        const interval = setInterval(checkActiveTasks, 3000);
+        return () => clearInterval(interval);
+    }, [activeTasks, id]);
 
     const handleInstallUpdate = async (packageName) => {
         try {
@@ -45,12 +88,28 @@ function MachineDetails() {
             if (scheduleDate) {
                 taskData.scheduled_for = new Date(scheduleDate).toISOString();
             }
-            await axios.post(`/api/frontend/machines/${id}/tasks`, taskData);
+            const res = await axios.post(`/api/frontend/machines/${id}/tasks`, taskData);
+            setActiveTasks(prev => [...prev, res.data.id]);
+
             setActionMessage(`Task to update ${packageName || 'all packages'} submitted!${scheduleDate ? ' (Scheduled)' : ''}`);
             setScheduleDate("");
             setTimeout(() => setActionMessage(""), 3000);
         } catch (error) {
             console.error("Error scheduling update", error);
+        }
+    };
+
+    const handleCheckUpdates = async () => {
+        try {
+            const res = await axios.post(`/api/frontend/machines/${id}/tasks`, {
+                task_type: "check_updates",
+                payload: "{}"
+            });
+            setActiveTasks(prev => [...prev, res.data.id]);
+            setActionMessage("Task to check for updates submitted. Checking agent in background...");
+            setTimeout(() => setActionMessage(""), 5000);
+        } catch (error) {
+            console.error("Error scheduling update check", error);
         }
     };
 
@@ -233,12 +292,22 @@ function MachineDetails() {
                 <div className="bg-white p-6 rounded-lg shadow-md border border-gray-200 lg:col-span-2">
                     <div className="flex justify-between items-center mb-4 border-b pb-2">
                         <h2 className="text-xl font-bold">Software Updates</h2>
-                        <button
-                            onClick={() => handleInstallUpdate(null)}
-                            className="flex items-center bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition-colors text-sm"
-                        >
-                            <RefreshCw size={14} className="mr-2" /> Update All
-                        </button>
+                        <div className="flex space-x-2">
+                            <button
+                                onClick={handleCheckUpdates}
+                                disabled={activeTasks.length > 0}
+                                className="flex items-center bg-gray-100 text-gray-700 px-4 py-2 rounded hover:bg-gray-200 transition-colors text-sm border border-gray-300 disabled:opacity-50"
+                            >
+                                <RefreshCw size={14} className={`mr-2 ${activeTasks.length > 0 ? 'animate-spin' : ''}`} /> Check Updates
+                            </button>
+                            <button
+                                onClick={() => handleInstallUpdate(null)}
+                                disabled={activeTasks.length > 0}
+                                className="flex items-center bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition-colors text-sm disabled:opacity-50"
+                            >
+                                <RefreshCw size={14} className="mr-2" /> Update All
+                            </button>
+                        </div>
                     </div>
 
                     <div className="mb-4 flex items-center space-x-4 bg-blue-50 p-3 rounded">
@@ -278,7 +347,8 @@ function MachineDetails() {
                                                     <td className="px-4 py-2">
                                                         <button
                                                             onClick={() => handleInstallUpdate(update.package_name)}
-                                                            className="text-blue-600 hover:text-blue-900 text-xs font-semibold px-2 py-1 border border-blue-200 rounded hover:bg-blue-50"
+                                                            disabled={activeTasks.length > 0}
+                                                            className="text-blue-600 hover:text-blue-900 text-xs font-semibold px-2 py-1 border border-blue-200 rounded hover:bg-blue-50 disabled:opacity-50"
                                                         >
                                                             Install
                                                         </button>
@@ -298,12 +368,13 @@ function MachineDetails() {
                                         type="text"
                                         value={installPackageId}
                                         onChange={(e) => setInstallPackageId(e.target.value)}
+                                        disabled={activeTasks.length > 0}
                                         placeholder="Enter Winget Package ID (e.g. Mozilla.Firefox)"
-                                        className="flex-grow px-3 py-1.5 border rounded text-sm focus:ring-blue-500"
+                                        className="flex-grow px-3 py-1.5 border rounded text-sm focus:ring-blue-500 disabled:opacity-50"
                                         required
                                     />
-                                    <button type="submit" className="bg-blue-600 text-white px-4 py-1.5 rounded text-sm hover:bg-blue-700">
-                                        Install
+                                    <button type="submit" disabled={activeTasks.length > 0} className="flex items-center bg-blue-600 text-white px-4 py-1.5 rounded text-sm hover:bg-blue-700 disabled:opacity-50">
+                                        <RefreshCw size={14} className={`mr-2 ${activeTasks.length > 0 ? 'animate-spin block' : 'hidden'}`} /> Install
                                     </button>
                                 </form>
                             </div>

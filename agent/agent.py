@@ -300,7 +300,19 @@ def execute_task(task):
     except:
         payload_data = {}
 
-    if task_type == "update_software":
+    if task_type == "check_updates":
+        logger.info("Received request to check for updates.")
+        global MACHINE_ID
+        if MACHINE_ID:
+            updates = get_available_updates()
+            try:
+                requests.post(f"{SERVER_URL}/api/agent/{MACHINE_ID}/updates", json=updates, headers=HEADERS)
+                return "completed", "Successfully checked and pushed latest updates to server."
+            except Exception as e:
+                return "failed", f"Failed to push updates: {e}"
+        return "failed", "Agent not fully registered yet."
+
+    elif task_type == "update_software":
         package = payload_data.get("package_name")
         os_name = platform.system()
 
@@ -309,16 +321,30 @@ def execute_task(task):
                 cmd = ["sudo", "apt", "install", "-y", package]
             else:
                 cmd = ["sudo", "apt", "upgrade", "-y"]
-            subprocess.run(cmd, check=True)
-            return "completed", f"Updated {package or 'all packages'}"
+
+            logger.info(f"Running APT update command: {' '.join(cmd)}")
+            try:
+                result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+                logger.info(f"APT Output:\n{result.stdout}")
+                return "completed", f"Updated {package or 'all packages'}"
+            except subprocess.CalledProcessError as e:
+                logger.error(f"APT Update Failed:\n{e.stderr or e.stdout}")
+                return "failed", f"Update failed: {e.stderr or e.stdout}"
 
         elif os_name == "Windows":
             if package:
                 cmd = ["winget", "upgrade", "--id", package, "--silent", "--accept-package-agreements", "--accept-source-agreements"]
             else:
                 cmd = ["winget", "upgrade", "--all", "--silent", "--accept-package-agreements", "--accept-source-agreements"]
-            subprocess.run(cmd, check=True)
-            return "completed", f"Updated {package or 'all packages'}"
+
+            logger.info(f"Running Winget update command: {' '.join(cmd)}")
+            try:
+                result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+                logger.info(f"Winget Output:\n{result.stdout}")
+                return "completed", f"Updated {package or 'all packages'}"
+            except subprocess.CalledProcessError as e:
+                logger.error(f"Winget Update Failed:\n{e.stderr or e.stdout}")
+                return "failed", f"Update failed: {e.stderr or e.stdout}"
 
     elif task_type == "install_software":
         package = payload_data.get("package_name")
@@ -328,11 +354,14 @@ def execute_task(task):
         os_name = platform.system()
         if os_name == "Windows":
             cmd = ["winget", "install", "--id", package, "--silent", "--accept-package-agreements", "--accept-source-agreements"]
+            logger.info(f"Running Winget install command: {' '.join(cmd)}")
             try:
-                subprocess.run(cmd, check=True)
+                result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+                logger.info(f"Winget Install Output:\n{result.stdout}")
                 return "completed", f"Installed {package}"
-            except Exception as e:
-                return "failed", f"Failed to install {package}: {str(e)}"
+            except subprocess.CalledProcessError as e:
+                logger.error(f"Winget Install Failed:\n{e.stderr or e.stdout}")
+                return "failed", f"Failed to install {package}: {e.stderr or e.stdout}"
         else:
             return "failed", "Software installation via agent is currently only supported on Windows using winget."
 
@@ -542,9 +571,9 @@ def main_loop():
             machine_data = resp.json()
             MACHINE_ID = machine_data["id"]
 
-            # 2. Check and submit updates
-            updates = get_available_updates()
-            requests.post(f"{SERVER_URL}/api/agent/{MACHINE_ID}/updates", json=updates, headers=HEADERS)
+            # 2. Check updates conditionally (only once on startup or when explicitly tasked)
+            # Actually, to avoid excessive CPU, we'll only do it via the explicit check_updates task.
+            # We skip periodic automatic updates here since they are very heavy.
 
             # 3. Fetch and execute tasks
             resp = requests.get(f"{SERVER_URL}/api/agent/{MACHINE_ID}/tasks", headers=HEADERS)
