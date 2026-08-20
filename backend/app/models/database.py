@@ -50,6 +50,7 @@ class AgentTask(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     scheduled_for = Column(DateTime, nullable=True)
     completed_at = Column(DateTime)
+    action_id = Column(String, nullable=True) # UUID correlating user action
 
     machine = relationship("Machine", back_populates="tasks")
 

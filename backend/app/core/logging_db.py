@@ -13,6 +13,7 @@ class AgentLog(Base):
     level = Column(String)
     message = Column(Text)
     module = Column(String, nullable=True)
+    action_id = Column(String, nullable=True)
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"
@@ -21,6 +22,7 @@ class AuditLog(Base):
     action = Column(String)
     user = Column(String)
     details = Column(Text)
+    action_id = Column(String, nullable=True)
 
 LOG_DB_DIR = "./data/logs"
 if not os.path.exists(LOG_DB_DIR):
@@ -31,9 +33,23 @@ _log_sessionmakers = {}
 
 def get_log_engine(machine_id: int):
     if machine_id not in _log_engines:
+        from sqlalchemy import text
         db_path = os.path.join(LOG_DB_DIR, f"logs_machine_{machine_id}.db")
         engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
         Base.metadata.create_all(bind=engine)
+
+        # Migrations for logs db
+        with engine.connect() as conn:
+            try:
+                conn.execute(text("ALTER TABLE agent_logs ADD COLUMN action_id VARCHAR"))
+            except Exception:
+                pass
+            try:
+                conn.execute(text("ALTER TABLE audit_logs ADD COLUMN action_id VARCHAR"))
+            except Exception:
+                pass
+            conn.commit()
+
         _log_engines[machine_id] = engine
         _log_sessionmakers[machine_id] = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     return _log_sessionmakers[machine_id]
@@ -46,9 +62,9 @@ def get_log_db(machine_id: int):
     finally:
         db.close()
 
-def log_audit_action(machine_id: int, action: str, user: str, details: str):
+def log_audit_action(machine_id: int, action: str, user: str, details: str, action_id: str = None):
     SessionLocal = get_log_engine(machine_id)
     with SessionLocal() as db:
-        new_log = AuditLog(action=action, user=user, details=details)
+        new_log = AuditLog(action=action, user=user, details=details, action_id=action_id)
         db.add(new_log)
         db.commit()

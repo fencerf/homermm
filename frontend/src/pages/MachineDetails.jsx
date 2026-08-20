@@ -5,6 +5,8 @@ import { ArrowLeft, Cpu, HardDrive, Database, RefreshCw, Archive, FolderSearch, 
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import RemoteFileBrowser from '../components/RemoteFileBrowser';
 import MachineLogsModal from '../components/MachineLogsModal';
+import { formatTime, fetchServerTimezone } from '../utils/timezone';
+import { generateUUID } from '../utils/uuid';
 
 function MachineDetails() {
     const { id } = useParams();
@@ -20,6 +22,7 @@ function MachineDetails() {
     const [activeTasks, setActiveTasks] = useState([]);
 
     useEffect(() => {
+        fetchServerTimezone();
         const fetchData = async () => {
             try {
                 const [machineRes, updatesRes, versionRes] = await Promise.all([
@@ -83,7 +86,8 @@ function MachineDetails() {
         try {
             const taskData = {
                 task_type: "update_software",
-                payload: JSON.stringify({ package_name: packageName })
+                payload: JSON.stringify({ package_name: packageName }),
+                action_id: generateUUID()
             };
             if (scheduleDate) {
                 taskData.scheduled_for = new Date(scheduleDate).toISOString();
@@ -103,7 +107,8 @@ function MachineDetails() {
         try {
             const res = await axios.post(`/api/frontend/machines/${id}/tasks`, {
                 task_type: "check_updates",
-                payload: "{}"
+                payload: "{}",
+                action_id: generateUUID()
             });
             setActiveTasks(prev => [...prev, res.data.id]);
             setActionMessage("Task to check for updates submitted. Checking agent in background...");
@@ -118,7 +123,8 @@ function MachineDetails() {
         try {
             const taskData = {
                 task_type: "install_software",
-                payload: JSON.stringify({ package_name: installPackageId })
+                payload: JSON.stringify({ package_name: installPackageId }),
+                action_id: generateUUID()
             };
             if (scheduleDate) {
                 taskData.scheduled_for = new Date(scheduleDate).toISOString();
@@ -140,7 +146,8 @@ function MachineDetails() {
             const pathsArray = kopiaPaths.split(',').map(p => p.trim()).filter(p => p);
             await axios.post(`/api/frontend/machines/${id}/tasks`, {
                 task_type: "configure_kopia",
-                payload: JSON.stringify({ paths: pathsArray })
+                payload: JSON.stringify({ paths: pathsArray }),
+                action_id: generateUUID()
             });
             setActionMessage("Kopia configuration task submitted!");
             setKopiaPaths("");
@@ -198,7 +205,8 @@ function MachineDetails() {
                                     try {
                                         await axios.post(`/api/frontend/machines/${machine.id}/tasks`, {
                                             task_type: "update_agent",
-                                            payload: "{}"
+                                            payload: "{}",
+                                            action_id: generateUUID()
                                         });
                                         setActionMessage("Agent update command sent.");
                                         setTimeout(() => setActionMessage(""), 3000);

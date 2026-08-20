@@ -67,7 +67,8 @@ def create_task(machine_id: int, task: schemas.AgentTaskCreate, db: Session = De
         machine_id=machine_id,
         action=f"Created task: {task.task_type}",
         user="admin", # Simplification since we have single-user admin token
-        details=f"Task ID: {db_task.id}, Payload: {task.payload}"
+        details=f"Task ID: {db_task.id}, Payload: {task.payload}",
+        action_id=task.action_id
     )
 
     return db_task
@@ -101,6 +102,48 @@ def get_machine_audit_logs(machine_id: int, db: Session = Depends(get_db), _: st
     LogSession = get_log_engine(machine_id)
     with LogSession() as log_db:
         return log_db.query(AuditLog).order_by(AuditLog.timestamp.desc()).limit(100).all()
+
+@router.get("/machines/{machine_id}/actions")
+def get_machine_actions(machine_id: int, db: Session = Depends(get_db), _: str = Depends(verify_admin)):
+    # Returns an aggregated timeline of user actions (AuditLogs), their correlated tasks, and agent logs
+    machine = db.query(models.Machine).filter(models.Machine.id == machine_id).first()
+    if not machine:
+        raise HTTPException(status_code=404, detail="Machine not found")
+
+    LogSession = get_log_engine(machine_id)
+
+    with LogSession() as log_db:
+        # Group by action_id where it exists
+        audit_logs = log_db.query(AuditLog).filter(AuditLog.action_id.isnot(None)).order_by(AuditLog.timestamp.desc()).limit(50).all()
+
+        actions = []
+        for audit in audit_logs:
+            action_id = audit.action_id
+
+            # Find related tasks in main DB
+            tasks = db.query(models.AgentTask).filter(models.AgentTask.action_id == action_id).all()
+            task_data = [schemas.AgentTask.model_validate(t).model_dump() for t in tasks]
+
+            # Find related agent logs in log DB
+            agent_logs = log_db.query(AgentLog).filter(AgentLog.action_id == action_id).order_by(AgentLog.timestamp.asc()).all()
+            agent_log_data = [{"timestamp": l.timestamp.isoformat(), "level": l.level, "message": l.message} for l in agent_logs]
+
+            actions.append({
+                "action_id": action_id,
+                "timestamp": audit.timestamp.isoformat(),
+                "user": audit.user,
+                "action": audit.action,
+                "details": audit.details,
+                "tasks": task_data,
+                "agent_logs": agent_log_data
+            })
+
+        return actions
+
+@router.get("/timezone")
+def get_server_timezone(_: str = Depends(verify_admin)):
+    tz = os.environ.get("TZ", "UTC")
+    return {"timezone": tz}
 
 def get_agent_path():
     # Dev path (host machine) vs Docker path

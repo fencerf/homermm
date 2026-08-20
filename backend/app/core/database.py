@@ -55,6 +55,11 @@ def init_db():
         except Exception:
             pass
 
+        try:
+            conn.execute(text("ALTER TABLE agent_tasks ADD COLUMN action_id VARCHAR"))
+        except Exception:
+            pass
+
         conn.commit()
 
 def get_db():

@@ -49,12 +49,14 @@ class AgentTaskBase(BaseModel):
     task_type: str
     payload: str
     scheduled_for: Optional[datetime] = None
+    action_id: Optional[str] = None
 
 class AgentLogCreate(BaseModel):
     timestamp: datetime
     level: str
     message: str
     module: Optional[str] = None
+    action_id: Optional[str] = None
 
 class AgentLogsBatch(BaseModel):
     logs: List[AgentLogCreate]
@@ -65,6 +67,7 @@ class AgentLog(BaseModel):
     level: str
     message: str
     module: Optional[str] = None
+    action_id: Optional[str] = None
 
     class Config:
         orm_mode = True
@@ -76,6 +79,7 @@ class AuditLog(BaseModel):
     action: str
     user: str
     details: str
+    action_id: Optional[str] = None
 
     class Config:
         orm_mode = True
@@ -92,6 +96,7 @@ class AgentTask(AgentTaskBase):
     created_at: datetime
     scheduled_for: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+    action_id: Optional[str] = None
 
     class Config:
         orm_mode = True

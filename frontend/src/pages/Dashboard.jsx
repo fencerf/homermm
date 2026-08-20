@@ -2,11 +2,14 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Link } from 'react-router-dom';
 import { Server, Monitor, Clock } from 'lucide-react';
+import { fetchServerTimezone, formatTime } from '../utils/timezone';
 
 function Dashboard() {
     const [machines, setMachines] = useState([]);
 
     useEffect(() => {
+        fetchServerTimezone(); // pre-fetch timezone on dashboard load
+
         const fetchMachines = async () => {
             try {
                 const response = await axios.get('/api/frontend/machines');
@@ -65,7 +68,7 @@ function Dashboard() {
                                 <p className="flex justify-between"><span>IP:</span> <span className="font-medium">{machine.ip_address}</span></p>
                                 <p className="flex items-center justify-between mt-4 pt-4 border-t text-xs text-gray-500">
                                     <span className="flex items-center"><Clock size={12} className="mr-1"/> Last seen:</span>
-                                    <span>{new Date(machine.last_seen).toLocaleString()}</span>
+                                    <span>{formatTime(machine.last_seen)}</span>
                                 </p>
                             </div>
                         </div>
