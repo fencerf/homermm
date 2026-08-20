@@ -14,6 +14,9 @@ import websocket
 import signal
 import sys
 
+# Thread-local storage to track the current action ID
+local_data = threading.local()
+
 # Logging setup
 log_buffer = []
 log_buffer_lock = threading.Lock()
@@ -25,7 +28,8 @@ class BufferedServerLogHandler(logging.Handler):
                 "timestamp": datetime.utcnow().isoformat(),
                 "level": record.levelname,
                 "message": self.format(record),
-                "module": record.module
+                "module": record.module,
+                "action_id": getattr(local_data, "action_id", None)
             }
             with log_buffer_lock:
                 log_buffer.append(log_entry)
@@ -293,6 +297,9 @@ def get_available_updates():
     return updates
 
 def execute_task(task):
+    # Set the action ID in the thread-local context so any logs emitted correlate to this task
+    local_data.action_id = task.get("action_id")
+
     task_type = task.get("task_type")
     payload = task.get("payload", "{}")
     try:
@@ -456,7 +463,11 @@ def execute_task(task):
     elif task_type == "update_agent":
         logger.info("Received update_agent task. Downloading new script...")
 
+        # Save the current action_id locally so the new thread can copy it
+        current_action_id = local_data.action_id
+
         def do_update():
+            local_data.action_id = current_action_id # Propagate context to new thread
             try:
                 resp = requests.get(f"{SERVER_URL}/api/agent/download", headers=HEADERS)
                 resp.raise_for_status()
@@ -580,9 +591,11 @@ def main_loop():
             tasks = resp.json()
 
             for task in tasks:
+                local_data.action_id = task.get("action_id") # Set context explicitly before logging
                 logger.info(f"Executing task: {task['task_type']}")
                 status, msg = execute_task(task)
                 requests.post(f"{SERVER_URL}/api/agent/{MACHINE_ID}/tasks/{task['id']}/result", params={"status": status, "result_message": msg}, headers=HEADERS)
+                local_data.action_id = None # Clear context
 
         except requests.exceptions.RequestException as e:
             logger.error(f"Error communicating with server: {e}")
