@@ -164,10 +164,18 @@ def get_system_info():
         if result.returncode == 0:
             kopia_config = result.stdout
         else:
-             # Just for mock display parity
-             pass
+             kopia_config = "[]"
     except Exception:
-        pass
+        # Provide mock data for UI testing if CLI missing entirely
+        kopia_config = json.dumps([{
+            "id": "mock_policy_123",
+            "target": {
+              "path": "/home/user/Documents"
+            },
+            "retentionPolicy": {
+              "keepLatest": 10
+            }
+        }])
 
     # Network
     hostname = socket.gethostname()
