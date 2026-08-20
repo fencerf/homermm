@@ -191,7 +191,7 @@ function MachineDetails() {
                             >
                                 <Terminal size={14} className="mr-1"/> Logs
                             </button>
-                            {latestAgentVersion !== "unknown" && machine.agent_version !== latestAgentVersion && (
+                            {latestAgentVersion !== "unknown" && (!machine.agent_version || machine.agent_version !== latestAgentVersion) && (
                                 <button
                                     onClick={async () => {
                                     try {
@@ -221,7 +221,7 @@ function MachineDetails() {
                             </div>
                             <div className="text-right">
                                 <p className="text-sm text-gray-500 font-semibold uppercase tracking-wider">Agent Version</p>
-                                <p className={`text-sm font-medium ${machine.agent_version !== latestAgentVersion ? 'text-red-600' : 'text-green-600'}`}>
+                                <p className={`text-sm font-medium ${(!machine.agent_version || machine.agent_version !== latestAgentVersion) ? 'text-red-600' : 'text-green-600'}`}>
                                     v{machine.agent_version || "Unknown"}
                                 </p>
                             </div>
