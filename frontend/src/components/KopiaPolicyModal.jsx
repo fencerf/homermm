@@ -11,18 +11,35 @@ function KopiaPolicyModal({ machineId, policy, onClose }) {
         keepMonthly: 6,
         keepAnnual: 3
     });
+    const [schedulingPolicy, setSchedulingPolicy] = useState({
+        intervalSeconds: 3600
+    });
+    const [ignoreRules, setIgnoreRules] = useState("");
+
     const [actionMessage, setActionMessage] = useState("");
     const [isSaving, setIsSaving] = useState(false);
 
     useEffect(() => {
-        if (policy && policy.retentionPolicy) {
-            setRetention({
-                keepHourly: policy.retentionPolicy.keepHourly !== undefined ? policy.retentionPolicy.keepHourly : 48,
-                keepDaily: policy.retentionPolicy.keepDaily !== undefined ? policy.retentionPolicy.keepDaily : 7,
-                keepWeekly: policy.retentionPolicy.keepWeekly !== undefined ? policy.retentionPolicy.keepWeekly : 4,
-                keepMonthly: policy.retentionPolicy.keepMonthly !== undefined ? policy.retentionPolicy.keepMonthly : 6,
-                keepAnnual: policy.retentionPolicy.keepAnnual !== undefined ? policy.retentionPolicy.keepAnnual : 3,
-            });
+        if (policy) {
+            if (policy.retentionPolicy) {
+                setRetention({
+                    keepHourly: policy.retentionPolicy.keepHourly !== undefined ? policy.retentionPolicy.keepHourly : 48,
+                    keepDaily: policy.retentionPolicy.keepDaily !== undefined ? policy.retentionPolicy.keepDaily : 7,
+                    keepWeekly: policy.retentionPolicy.keepWeekly !== undefined ? policy.retentionPolicy.keepWeekly : 4,
+                    keepMonthly: policy.retentionPolicy.keepMonthly !== undefined ? policy.retentionPolicy.keepMonthly : 6,
+                    keepAnnual: policy.retentionPolicy.keepAnnual !== undefined ? policy.retentionPolicy.keepAnnual : 3,
+                });
+            }
+            if (policy.schedulingPolicy) {
+                setSchedulingPolicy({
+                    intervalSeconds: policy.schedulingPolicy.intervalSeconds !== undefined ? policy.schedulingPolicy.intervalSeconds : 0,
+                });
+            }
+            if (policy.filesPolicy && policy.filesPolicy.ignoreRules) {
+                setIgnoreRules(policy.filesPolicy.ignoreRules.join('\n'));
+            } else {
+                setIgnoreRules('');
+            }
         }
     }, [policy]);
 
@@ -33,7 +50,11 @@ function KopiaPolicyModal({ machineId, policy, onClose }) {
                 task_type: "update_kopia_policy",
                 payload: JSON.stringify({
                     path: policy.target?.path,
-                    retentionPolicy: retention
+                    retentionPolicy: retention,
+                    schedulingPolicy: schedulingPolicy,
+                    filesPolicy: {
+                        ignoreRules: ignoreRules.split('\n').map(line => line.trim()).filter(line => line)
+                    }
                 }),
                 action_id: generateUUID()
             });
@@ -140,6 +161,37 @@ function KopiaPolicyModal({ machineId, policy, onClose }) {
                                 className="w-full border rounded px-3 py-2"
                                 value={retention.keepAnnual}
                                 onChange={e => setRetention({...retention, keepAnnual: parseInt(e.target.value, 10) || 0})}
+                            />
+                        </div>
+                    </div>
+
+                    <h4 className="font-medium text-gray-700 mb-4 mt-6 border-b pb-2">Scheduling</h4>
+                    <div className="space-y-4">
+                        <div>
+                            <label className="block text-sm text-gray-600 mb-1" htmlFor="intervalSeconds">Snapshot Interval (Seconds) - 0 to disable</label>
+                            <input
+                                id="intervalSeconds"
+                                name="intervalSeconds"
+                                type="number"
+                                className="w-full border rounded px-3 py-2"
+                                value={schedulingPolicy.intervalSeconds}
+                                onChange={e => setSchedulingPolicy({intervalSeconds: parseInt(e.target.value, 10) || 0})}
+                                placeholder="e.g. 3600 for 1 hour"
+                            />
+                        </div>
+                    </div>
+
+                    <h4 className="font-medium text-gray-700 mb-4 mt-6 border-b pb-2">Ignore Rules</h4>
+                    <div className="space-y-4">
+                        <div>
+                            <label className="block text-sm text-gray-600 mb-1" htmlFor="ignoreRules">One rule per line (e.g. *.tmp, node_modules/)</label>
+                            <textarea
+                                id="ignoreRules"
+                                name="ignoreRules"
+                                className="w-full border rounded px-3 py-2 h-32 font-mono text-sm"
+                                value={ignoreRules}
+                                onChange={e => setIgnoreRules(e.target.value)}
+                                placeholder="*.log&#10;node_modules/&#10;.cache/"
                             />
                         </div>
                     </div>
