@@ -350,6 +350,7 @@ def execute_task(task):
         package = payload_data.get("package_name")
         os_name = platform.system()
 
+        status, msg = "failed", "Unknown OS"
         if os_name == "Linux":
             if package:
                 cmd = ["sudo", "apt", "install", "-y", package]
@@ -360,10 +361,10 @@ def execute_task(task):
             try:
                 result = subprocess.run(cmd, check=True, capture_output=True, text=True)
                 logger.info(f"APT Output:\n{result.stdout}")
-                return "completed", f"Updated {package or 'all packages'}"
+                status, msg = "completed", f"Updated {package or 'all packages'}"
             except subprocess.CalledProcessError as e:
                 logger.error(f"APT Update Failed:\n{e.stderr or e.stdout}")
-                return "failed", f"Update failed: {e.stderr or e.stdout}"
+                status, msg = "failed", f"Update failed: {e.stderr or e.stdout}"
 
         elif os_name == "Windows":
             if package:
@@ -375,16 +376,22 @@ def execute_task(task):
             try:
                 result = subprocess.run(cmd, check=True, capture_output=True, text=True)
                 logger.info(f"Winget Output:\n{result.stdout}")
-                return "completed", f"Updated {package or 'all packages'}"
+                status, msg = "completed", f"Updated {package or 'all packages'}"
             except subprocess.CalledProcessError as e:
                 logger.error(f"Winget Update Failed:\n{e.stderr or e.stdout}")
-                return "failed", f"Update failed: {e.stderr or e.stdout}"
+                status, msg = "failed", f"Update failed: {e.stderr or e.stdout}"
+
+        if status == "completed":
+            # Refresh updates list
+            execute_task({"task_type": "check_updates"})
+        return status, msg
 
     elif task_type == "install_software":
         package = payload_data.get("package_name")
         if not package:
             return "failed", "No package name provided for installation."
 
+        status, msg = "failed", "Unknown"
         os_name = platform.system()
         if os_name == "Windows":
             cmd = ["winget", "install", "--id", package, "--silent", "--accept-package-agreements", "--accept-source-agreements"]
@@ -392,12 +399,75 @@ def execute_task(task):
             try:
                 result = subprocess.run(cmd, check=True, capture_output=True, text=True)
                 logger.info(f"Winget Install Output:\n{result.stdout}")
-                return "completed", f"Installed {package}"
+                status, msg = "completed", f"Installed {package}"
             except subprocess.CalledProcessError as e:
                 logger.error(f"Winget Install Failed:\n{e.stderr or e.stdout}")
-                return "failed", f"Failed to install {package}: {e.stderr or e.stdout}"
+                status, msg = "failed", f"Failed to install {package}: {e.stderr or e.stdout}"
         else:
-            return "failed", "Software installation via agent is currently only supported on Windows using winget."
+            status, msg = "failed", "Software installation via agent is currently only supported on Windows using winget."
+
+        if status == "completed":
+            # Refresh updates list
+            execute_task({"task_type": "check_updates"})
+        return status, msg
+
+    elif task_type == "run_kopia_backup":
+        try:
+            payload_data = json.loads(task['payload'])
+        except json.JSONDecodeError:
+            return "failed", "Invalid payload json"
+
+        path = payload_data.get("path")
+        if not path:
+             return "failed", "No path provided to backup."
+
+        kopia_cmd = get_kopia_cmd()
+        try:
+            logger.info(f"Starting Kopia snapshot for {path}")
+            # Run snapshot using standard snapshot command
+            subprocess.run([kopia_cmd, "snapshot", "create", path], check=True, capture_output=True, text=True)
+            logger.info(f"Successfully completed Kopia snapshot for {path}")
+            return "completed", f"Snapshot completed for {path}"
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed taking Kopia snapshot: {e.stderr}")
+            return "failed", f"Snapshot failed: {e.stderr}"
+        except FileNotFoundError:
+            return "failed", "Kopia CLI not found on machine."
+
+    elif task_type == "update_kopia_policy":
+        try:
+            payload_data = json.loads(task['payload'])
+        except json.JSONDecodeError:
+            return "failed", "Invalid payload json"
+
+        path = payload_data.get("path")
+        retention = payload_data.get("retentionPolicy", {})
+        if not path:
+             return "failed", "No path provided for policy update."
+
+        kopia_cmd = get_kopia_cmd()
+        try:
+             logger.info(f"Updating Kopia policy for {path} with retention: {retention}")
+             cmd = [kopia_cmd, "policy", "set", path]
+             if "keepHourly" in retention:
+                 cmd.extend(["--keep-hourly", str(retention["keepHourly"])])
+             if "keepDaily" in retention:
+                 cmd.extend(["--keep-daily", str(retention["keepDaily"])])
+             if "keepWeekly" in retention:
+                 cmd.extend(["--keep-weekly", str(retention["keepWeekly"])])
+             if "keepMonthly" in retention:
+                 cmd.extend(["--keep-monthly", str(retention["keepMonthly"])])
+             if "keepAnnual" in retention:
+                 cmd.extend(["--keep-annual", str(retention["keepAnnual"])])
+
+             subprocess.run(cmd, check=True, capture_output=True, text=True)
+             logger.info(f"Successfully updated Kopia policy for {path}")
+             return "completed", f"Policy updated for {path}"
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed updating Kopia policy: {e.stderr}")
+            return "failed", f"Policy update failed: {e.stderr}"
+        except FileNotFoundError:
+            return "failed", "Kopia CLI not found on machine."
 
     elif task_type == "configure_kopia":
         try:

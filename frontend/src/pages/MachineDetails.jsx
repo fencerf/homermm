@@ -5,6 +5,7 @@ import { ArrowLeft, Cpu, HardDrive, Database, RefreshCw, Archive, FolderSearch, 
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import RemoteFileBrowser from '../components/RemoteFileBrowser';
 import MachineLogsModal from '../components/MachineLogsModal';
+import KopiaPolicyModal from '../components/KopiaPolicyModal';
 import { formatTime, fetchServerTimezone } from '../utils/timezone';
 import { generateUUID } from '../utils/uuid';
 
@@ -18,6 +19,7 @@ function MachineDetails() {
     const [actionMessage, setActionMessage] = useState("");
     const [isBrowserOpen, setIsBrowserOpen] = useState(false);
     const [isLogsOpen, setIsLogsOpen] = useState(false);
+    const [editingPolicy, setEditingPolicy] = useState(null);
     const [latestAgentVersion, setLatestAgentVersion] = useState("");
     const [activeTasks, setActiveTasks] = useState([]);
 
@@ -50,6 +52,15 @@ function MachineDetails() {
         const taskInterval = setInterval(pollUpdatesAndTasks, 5000);
         return () => clearInterval(taskInterval);
     }, [id]);
+
+    const fetchMachineData = async () => {
+        try {
+            const res = await axios.get(`/api/frontend/machines/${id}`);
+            setMachine(res.data);
+        } catch (e) {
+            console.error("Failed to refresh machine data", e);
+        }
+    };
 
     // Manage active tasks polling properly outside of the interval
     useEffect(() => {
@@ -135,6 +146,15 @@ function MachineDetails() {
             setInstallPackageId("");
             setScheduleDate("");
             setTimeout(() => setActionMessage(""), 3000);
+
+            // Re-fetch updates list shortly after submitting task
+            setTimeout(async () => {
+                try {
+                    const updatesRes = await axios.get(`/api/frontend/machines/${id}/updates`);
+                    setUpdates(updatesRes.data);
+                } catch(e){}
+            }, 3000);
+
         } catch (error) {
             console.error("Error scheduling install", error);
         }
@@ -461,9 +481,17 @@ function MachineDetails() {
                             {activeKopiaPolicies.length > 0 ? (
                                 <ul className="bg-gray-50 p-4 rounded text-sm text-gray-800 overflow-auto border border-gray-200 max-h-48 space-y-2">
                                     {activeKopiaPolicies.map((policy, idx) => (
-                                        <li key={idx} className="flex flex-col border-b pb-2 last:border-b-0 last:pb-0">
-                                            <span className="font-semibold">{policy.target?.path || policy.id}</span>
-                                            <span className="text-xs text-gray-500">Retention: {policy.retentionPolicy?.keepLatest || policy.retention?.keepLatest || 'Default'} latest</span>
+                                        <li key={idx} className="flex items-center justify-between border-b pb-2 last:border-b-0 last:pb-0">
+                                            <div className="flex flex-col">
+                                                <span className="font-semibold">{policy.target?.path || policy.id}</span>
+                                                <span className="text-xs text-gray-500">Retention: {policy.retentionPolicy?.keepLatest || policy.retention?.keepLatest || 'Default'} latest</span>
+                                            </div>
+                                            <button
+                                                onClick={() => setEditingPolicy(policy)}
+                                                className="text-sm bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1 rounded transition-colors"
+                                            >
+                                                Edit Policy
+                                            </button>
                                         </li>
                                     ))}
                                 </ul>
@@ -489,6 +517,17 @@ function MachineDetails() {
                 <MachineLogsModal
                     machineId={machine.id}
                     onClose={() => setIsLogsOpen(false)}
+                />
+            )}
+
+            {editingPolicy && (
+                <KopiaPolicyModal
+                    machineId={machine.id}
+                    policy={editingPolicy}
+                    onClose={(changed) => {
+                        setEditingPolicy(null);
+                        if (changed) fetchMachineData();
+                    }}
                 />
             )}
         </div>
