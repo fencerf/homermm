@@ -37,7 +37,7 @@ class BufferedServerLogHandler(logging.Handler):
         except Exception:
             self.handleError(record)
 
-AGENT_VERSION = "1.1.2"
+AGENT_VERSION = "1.1.3"
 
 def get_kopia_cmd():
     # If the user explicitly provided a path in config.json
@@ -442,13 +442,17 @@ def execute_task(task):
 
         path = payload_data.get("path")
         retention = payload_data.get("retentionPolicy", {})
+        scheduling = payload_data.get("schedulingPolicy", {})
+        files = payload_data.get("filesPolicy", {})
         if not path:
              return "failed", "No path provided for policy update."
 
         kopia_cmd = get_kopia_cmd()
         try:
-             logger.info(f"Updating Kopia policy for {path} with retention: {retention}")
+             logger.info(f"Updating Kopia policy for {path}")
              cmd = [kopia_cmd, "policy", "set", path]
+
+             # Retention
              if "keepHourly" in retention:
                  cmd.extend(["--keep-hourly", str(retention["keepHourly"])])
              if "keepDaily" in retention:
@@ -459,6 +463,22 @@ def execute_task(task):
                  cmd.extend(["--keep-monthly", str(retention["keepMonthly"])])
              if "keepAnnual" in retention:
                  cmd.extend(["--keep-annual", str(retention["keepAnnual"])])
+
+             # Scheduling
+             if "intervalSeconds" in scheduling:
+                 interval = scheduling["intervalSeconds"]
+                 if interval > 0:
+                     cmd.extend(["--snapshot-interval", f"{interval}s"])
+                 else:
+                     # Using 0s disables interval-based scheduling
+                     cmd.extend(["--snapshot-interval", "0s"])
+
+             # Files / Ignore Rules
+             if "ignoreRules" in files:
+                 cmd.extend(["--clear-ignore"])
+                 for rule in files["ignoreRules"]:
+                     if rule:
+                         cmd.extend(["--add-ignore", rule])
 
              subprocess.run(cmd, check=True, capture_output=True, text=True)
              logger.info(f"Successfully updated Kopia policy for {path}")
