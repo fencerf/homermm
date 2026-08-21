@@ -12,7 +12,8 @@ function KopiaPolicyModal({ machineId, policy, onClose }) {
         keepAnnual: 3
     });
     const [schedulingPolicy, setSchedulingPolicy] = useState({
-        intervalSeconds: 3600
+        intervalSeconds: 3600,
+        timesOfDay: ""
     });
     const [ignoreRules, setIgnoreRules] = useState("");
 
@@ -31,8 +32,18 @@ function KopiaPolicyModal({ machineId, policy, onClose }) {
                 });
             }
             if (policy.schedulingPolicy) {
+                let timesOfDayStr = "";
+                if (policy.schedulingPolicy.timeOfDay && Array.isArray(policy.schedulingPolicy.timeOfDay)) {
+                    timesOfDayStr = policy.schedulingPolicy.timeOfDay.map(t => {
+                        const h = t.hour !== undefined ? t.hour.toString().padStart(2, '0') : '00';
+                        const m = t.minute !== undefined ? t.minute.toString().padStart(2, '0') : '00';
+                        return `${h}:${m}`;
+                    }).join(', ');
+                }
+
                 setSchedulingPolicy({
                     intervalSeconds: policy.schedulingPolicy.intervalSeconds !== undefined ? policy.schedulingPolicy.intervalSeconds : 0,
+                    timesOfDay: timesOfDayStr
                 });
             }
             if (policy.filesPolicy && policy.filesPolicy.ignoreRules) {
@@ -45,13 +56,19 @@ function KopiaPolicyModal({ machineId, policy, onClose }) {
 
     const handleSave = async () => {
         setIsSaving(true);
+
+        const timesOfDayList = schedulingPolicy.timesOfDay.split(',').map(t => t.trim()).filter(t => t);
+
         try {
             await axios.post(`/api/frontend/machines/${machineId}/tasks`, {
                 task_type: "update_kopia_policy",
                 payload: JSON.stringify({
                     path: policy.target?.path,
                     retentionPolicy: retention,
-                    schedulingPolicy: schedulingPolicy,
+                    schedulingPolicy: {
+                        intervalSeconds: schedulingPolicy.intervalSeconds,
+                        timesOfDay: timesOfDayList
+                    },
                     filesPolicy: {
                         ignoreRules: ignoreRules.split('\n').map(line => line.trim()).filter(line => line)
                     }
@@ -175,8 +192,20 @@ function KopiaPolicyModal({ machineId, policy, onClose }) {
                                 type="number"
                                 className="w-full border rounded px-3 py-2"
                                 value={schedulingPolicy.intervalSeconds}
-                                onChange={e => setSchedulingPolicy({intervalSeconds: parseInt(e.target.value, 10) || 0})}
+                                onChange={e => setSchedulingPolicy({...schedulingPolicy, intervalSeconds: parseInt(e.target.value, 10) || 0})}
                                 placeholder="e.g. 3600 for 1 hour"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm text-gray-600 mb-1" htmlFor="timesOfDay">Times of Day (comma separated)</label>
+                            <input
+                                id="timesOfDay"
+                                name="timesOfDay"
+                                type="text"
+                                className="w-full border rounded px-3 py-2"
+                                value={schedulingPolicy.timesOfDay}
+                                onChange={e => setSchedulingPolicy({...schedulingPolicy, timesOfDay: e.target.value})}
+                                placeholder="e.g. 12:00, 18:30"
                             />
                         </div>
                     </div>
