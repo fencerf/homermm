@@ -5,7 +5,9 @@ import { ArrowLeft, Cpu, HardDrive, Database, RefreshCw, Archive, FolderSearch, 
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import RemoteFileBrowser from '../components/RemoteFileBrowser';
 import MachineLogsModal from '../components/MachineLogsModal';
+import EventLogsModal from '../components/EventLogsModal';
 import KopiaPolicyModal from '../components/KopiaPolicyModal';
+import TextEditorModal from '../components/TextEditorModal';
 import { formatTime, fetchServerTimezone } from '../utils/timezone';
 import { generateUUID } from '../utils/uuid';
 
@@ -19,7 +21,9 @@ function MachineDetails() {
     const [actionMessage, setActionMessage] = useState("");
     const [isBrowserOpen, setIsBrowserOpen] = useState(false);
     const [isLogsOpen, setIsLogsOpen] = useState(false);
+    const [isEventLogsOpen, setIsEventLogsOpen] = useState(false);
     const [editingPolicy, setEditingPolicy] = useState(null);
+    const [editingFilePath, setEditingFilePath] = useState(null);
     const [latestAgentVersion, setLatestAgentVersion] = useState("");
     const [activeTasks, setActiveTasks] = useState([]);
 
@@ -217,7 +221,13 @@ function MachineDetails() {
                                 onClick={() => setIsLogsOpen(true)}
                                 className="px-3 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 text-xs rounded shadow flex items-center"
                             >
-                                <Terminal size={14} className="mr-1"/> Logs
+                                <Terminal size={14} className="mr-1"/> Agent Logs
+                            </button>
+                            <button
+                                onClick={() => setIsEventLogsOpen(true)}
+                                className="px-3 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 text-xs rounded shadow flex items-center"
+                            >
+                                Event Logs
                             </button>
                             {latestAgentVersion !== "unknown" && (!machine.agent_version || machine.agent_version !== latestAgentVersion) && (
                                 <button
@@ -480,20 +490,41 @@ function MachineDetails() {
                             <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-2">Active Agent Policies</h3>
                             {activeKopiaPolicies.length > 0 ? (
                                 <ul className="bg-gray-50 p-4 rounded text-sm text-gray-800 overflow-auto border border-gray-200 max-h-48 space-y-2">
-                                    {activeKopiaPolicies.map((policy, idx) => (
-                                        <li key={idx} className="flex items-center justify-between border-b pb-2 last:border-b-0 last:pb-0">
-                                            <div className="flex flex-col">
-                                                <span className="font-semibold">{policy.target?.path || policy.id}</span>
-                                                <span className="text-xs text-gray-500">Retention: {policy.retentionPolicy?.keepLatest || policy.retention?.keepLatest || 'Default'} latest</span>
-                                            </div>
-                                            <button
-                                                onClick={() => setEditingPolicy(policy)}
-                                                className="text-sm bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1 rounded transition-colors"
-                                            >
-                                                Edit Policy
-                                            </button>
-                                        </li>
-                                    ))}
+                                    {activeKopiaPolicies.map((policy, idx) => {
+                                        // Simple logic to append .kopiaignore to directory path
+                                        let ignorePath = "";
+                                        if (policy.target?.path) {
+                                            const separator = machine.os === "Windows" ? "\\" : "/";
+                                            ignorePath = policy.target.path.endsWith(separator)
+                                                ? `${policy.target.path}.kopiaignore`
+                                                : `${policy.target.path}${separator}.kopiaignore`;
+                                        }
+
+                                        return (
+                                            <li key={idx} className="flex items-center justify-between border-b pb-2 last:border-b-0 last:pb-0">
+                                                <div className="flex flex-col">
+                                                    <span className="font-semibold">{policy.target?.path || policy.id}</span>
+                                                    <span className="text-xs text-gray-500">Retention: {policy.retentionPolicy?.keepLatest || policy.retention?.keepLatest || 'Default'} latest</span>
+                                                </div>
+                                                <div className="flex space-x-2">
+                                                    {ignorePath && (
+                                                        <button
+                                                            onClick={() => setEditingFilePath(ignorePath)}
+                                                            className="text-sm bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1 rounded transition-colors"
+                                                        >
+                                                            Edit .kopiaignore
+                                                        </button>
+                                                    )}
+                                                    <button
+                                                        onClick={() => setEditingPolicy(policy)}
+                                                        className="text-sm bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1 rounded transition-colors"
+                                                    >
+                                                        Edit Policy
+                                                    </button>
+                                                </div>
+                                            </li>
+                                        );
+                                    })}
                                 </ul>
                             ) : (
                                 <pre className="bg-gray-50 p-4 rounded text-xs text-gray-800 overflow-auto border border-gray-200 max-h-48">
@@ -520,6 +551,13 @@ function MachineDetails() {
                 />
             )}
 
+            {isEventLogsOpen && (
+                <EventLogsModal
+                    machineId={machine.id}
+                    onClose={() => setIsEventLogsOpen(false)}
+                />
+            )}
+
             {editingPolicy && (
                 <KopiaPolicyModal
                     machineId={machine.id}
@@ -528,6 +566,14 @@ function MachineDetails() {
                         setEditingPolicy(null);
                         if (changed) fetchMachineData();
                     }}
+                />
+            )}
+
+            {editingFilePath && (
+                <TextEditorModal
+                    machineId={machine.id}
+                    filePath={editingFilePath}
+                    onClose={() => setEditingFilePath(null)}
                 />
             )}
         </div>

@@ -37,7 +37,7 @@ class BufferedServerLogHandler(logging.Handler):
         except Exception:
             self.handleError(record)
 
-AGENT_VERSION = "1.1.3"
+AGENT_VERSION = "1.1.4"
 
 def get_kopia_cmd():
     # If the user explicitly provided a path in config.json
@@ -473,6 +473,12 @@ def execute_task(task):
                      # Using 0s disables interval-based scheduling
                      cmd.extend(["--snapshot-interval", "0s"])
 
+             if "timesOfDay" in scheduling:
+                 cmd.extend(["--clear-time"])
+                 for time_str in scheduling["timesOfDay"]:
+                     if time_str:
+                         cmd.extend(["--add-time", time_str])
+
              # Files / Ignore Rules
              if "ignoreRules" in files:
                  cmd.extend(["--clear-ignore"])
@@ -488,6 +494,46 @@ def execute_task(task):
             return "failed", f"Policy update failed: {e.stderr}"
         except FileNotFoundError:
             return "failed", "Kopia CLI not found on machine."
+
+    elif task_type == "read_file":
+        try:
+            payload_data = json.loads(task['payload'])
+        except json.JSONDecodeError:
+            return "failed", "Invalid payload json"
+
+        path = payload_data.get("path")
+        if not path:
+             return "failed", "No path provided for read_file."
+
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                content = f.read()
+            return "completed", json.dumps({"content": content})
+        except FileNotFoundError:
+            # For .kopiaignore specifically, if it doesn't exist we can just return empty, but let's be explicit
+            return "completed", json.dumps({"content": ""})
+        except Exception as e:
+            return "failed", f"Failed to read file: {e}"
+
+    elif task_type == "write_file":
+        try:
+            payload_data = json.loads(task['payload'])
+        except json.JSONDecodeError:
+            return "failed", "Invalid payload json"
+
+        path = payload_data.get("path")
+        content = payload_data.get("content", "")
+        if not path:
+             return "failed", "No path provided for write_file."
+
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(content)
+            logger.info(f"Successfully wrote to {path}")
+            return "completed", f"Saved {path}"
+        except Exception as e:
+            logger.error(f"Failed to write file {path}: {e}")
+            return "failed", f"Failed to write file: {e}"
 
     elif task_type == "configure_kopia":
         try:
@@ -580,6 +626,78 @@ def execute_task(task):
              threading.Thread(target=interactive_filebrowser_ws, daemon=True).start()
              return "completed", "WebSocket filebrowser connection established"
         return "completed", "WebSocket filebrowser connection already active"
+
+    elif task_type == "fetch_event_logs":
+        try:
+            logger.info("Fetching OS event logs (last 5 days, Warnings/Errors)...")
+            events = []
+
+            if platform.system() == "Windows":
+                # Use Get-WinEvent to fetch System and Application logs, level 2 (Error) and 3 (Warning)
+                # Outputting as JSON
+                ps_script = """
+                $startTime = (Get-Date).AddDays(-5)
+                $logs = Get-WinEvent -FilterHashtable @{LogName='System','Application'; Level=2,3; StartTime=$startTime} -ErrorAction SilentlyContinue | Select-Object TimeCreated, LevelDisplayName, Message, ProviderName | ConvertTo-Json -Compress -Depth 1
+                if ($logs) { Write-Output $logs } else { Write-Output "[]" }
+                """
+                result = subprocess.run(["powershell", "-NoProfile", "-Command", ps_script], capture_output=True, text=True)
+
+                if result.returncode == 0:
+                    try:
+                        raw_events = json.loads(result.stdout)
+                        if isinstance(raw_events, dict): # Sometimes ConvertTo-Json returns a single object instead of array
+                            raw_events = [raw_events]
+
+                        for ev in raw_events:
+                            # LevelDisplayName is often "Warning" or "Error"
+                            events.append({
+                                "timestamp": ev.get("TimeCreated", ""),
+                                "level": ev.get("LevelDisplayName", "Warning"),
+                                "message": ev.get("Message", ""),
+                                "source": ev.get("ProviderName", "Windows")
+                            })
+                    except json.JSONDecodeError:
+                        logger.error(f"Failed to parse PowerShell event logs: {result.stdout}")
+                else:
+                    logger.error(f"Failed to fetch Windows event logs: {result.stderr}")
+
+            else:
+                # Linux: use journalctl for priority 3 (err) to 4 (warning)
+                try:
+                    cmd = ["journalctl", "-p", "3..4", "--since", "5 days ago", "--output=json"]
+                    result = subprocess.run(cmd, capture_output=True, text=True)
+                    if result.returncode == 0:
+                        lines = result.stdout.strip().split('\n')
+                        import datetime as dt_module
+                        for line in lines:
+                            if not line.strip(): continue
+                            try:
+                                entry = json.loads(line)
+                                # journalctl uses PRIORITY. 3=err, 4=warning
+                                prio = str(entry.get("PRIORITY", "4"))
+                                level_str = "Error" if prio == "3" else "Warning"
+
+                                # Timestamps are in microseconds since epoch typically
+                                ts_micro = int(entry.get("__REALTIME_TIMESTAMP", 0))
+                                ts_iso = dt_module.datetime.fromtimestamp(ts_micro / 1000000.0, dt_module.timezone.utc).isoformat()
+
+                                events.append({
+                                    "timestamp": ts_iso,
+                                    "level": level_str,
+                                    "message": entry.get("MESSAGE", ""),
+                                    "source": entry.get("SYSLOG_IDENTIFIER", "journal")
+                                })
+                            except json.JSONDecodeError:
+                                pass
+                    else:
+                        logger.error(f"Failed to fetch Linux event logs: {result.stderr}")
+                except FileNotFoundError:
+                    logger.warning("journalctl not found on this system.")
+
+            return "completed", json.dumps({"events": events})
+        except Exception as e:
+            logger.error(f"Unexpected error fetching event logs: {e}")
+            return "failed", str(e)
 
     elif task_type == "update_agent":
         logger.info("Received update_agent task. Downloading new script...")
