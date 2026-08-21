@@ -29,6 +29,10 @@ class Machine(MachineBase):
         orm_mode = True
         from_attributes = True
 
+class TaskResultBody(BaseModel):
+    status: str
+    result_message: Optional[str] = None
+
 class PendingUpdateBase(BaseModel):
     package_name: str
     description: Optional[str] = None

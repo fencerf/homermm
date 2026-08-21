@@ -129,7 +129,7 @@ async def websocket_agent_endpoint(websocket: WebSocket, machine_id: int, token:
         manager.disconnect_agent(machine_id)
 
 @router.post("/{machine_id}/tasks/{task_id}/result")
-def submit_task_result(machine_id: int, task_id: int, status: str, result_message: Optional[str] = None, db: Session = Depends(get_db), _: str = Depends(verify_agent_key)):
+def submit_task_result(machine_id: int, task_id: int, result: schemas.TaskResultBody, db: Session = Depends(get_db), _: str = Depends(verify_agent_key)):
     task = db.query(models.AgentTask).filter(
         models.AgentTask.id == task_id,
         models.AgentTask.machine_id == machine_id
@@ -138,8 +138,8 @@ def submit_task_result(machine_id: int, task_id: int, status: str, result_messag
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    task.status = status
-    task.result_message = result_message
+    task.status = result.status
+    task.result_message = result.result_message
     task.completed_at = datetime.utcnow()
     db.commit()
     return {"status": "success"}

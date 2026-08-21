@@ -637,7 +637,7 @@ def execute_task(task):
                 # Outputting as JSON
                 ps_script = """
                 $startTime = (Get-Date).AddDays(-5)
-                $logs = Get-WinEvent -FilterHashtable @{LogName='System','Application'; Level=2,3; StartTime=$startTime} -ErrorAction SilentlyContinue | Select-Object TimeCreated, LevelDisplayName, Message, ProviderName | ConvertTo-Json -Compress -Depth 1
+                $logs = Get-WinEvent -FilterHashtable @{LogName='System','Application'; Level=2,3; StartTime=$startTime} -MaxEvents 500 -ErrorAction SilentlyContinue | Select-Object TimeCreated, LevelDisplayName, Message, ProviderName | ConvertTo-Json -Compress -Depth 1
                 if ($logs) { Write-Output $logs } else { Write-Output "[]" }
                 """
                 result = subprocess.run(["powershell", "-NoProfile", "-Command", ps_script], capture_output=True, text=True)
@@ -664,7 +664,7 @@ def execute_task(task):
             else:
                 # Linux: use journalctl for priority 3 (err) to 4 (warning)
                 try:
-                    cmd = ["journalctl", "-p", "3..4", "--since", "5 days ago", "--output=json"]
+                    cmd = ["journalctl", "-p", "3..4", "--since", "5 days ago", "-n", "500", "--output=json"]
                     result = subprocess.run(cmd, capture_output=True, text=True)
                     if result.returncode == 0:
                         lines = result.stdout.strip().split('\n')
@@ -833,7 +833,7 @@ def main_loop():
                 local_data.action_id = task.get("action_id") # Set context explicitly before logging
                 logger.info(f"Executing task: {task['task_type']}")
                 status, msg = execute_task(task)
-                requests.post(f"{SERVER_URL}/api/agent/{MACHINE_ID}/tasks/{task['id']}/result", params={"status": status, "result_message": msg}, headers=HEADERS)
+                requests.post(f"{SERVER_URL}/api/agent/{MACHINE_ID}/tasks/{task['id']}/result", json={"status": status, "result_message": msg}, headers=HEADERS)
                 local_data.action_id = None # Clear context
 
         except requests.exceptions.RequestException as e:
