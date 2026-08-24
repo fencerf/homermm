@@ -24,6 +24,18 @@ class AuditLog(Base):
     details = Column(Text)
     action_id = Column(String, nullable=True)
 
+from sqlalchemy import UniqueConstraint
+
+class OSEventLog(Base):
+    __tablename__ = "os_event_logs"
+    id = Column(Integer, primary_key=True, index=True)
+    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+    level = Column(String)
+    message = Column(Text)
+    source = Column(String)
+
+    __table_args__ = (UniqueConstraint('timestamp', 'source', 'message', name='uix_os_event'),)
+
 LOG_DB_DIR = "./data/logs"
 if not os.path.exists(LOG_DB_DIR):
     os.makedirs(LOG_DB_DIR)
@@ -70,6 +82,7 @@ def enforce_log_retention(machine_id: int):
     with SessionLocal() as db:
         db.query(AgentLog).filter(AgentLog.timestamp < cutoff_date).delete()
         db.query(AuditLog).filter(AuditLog.timestamp < cutoff_date).delete()
+        db.query(OSEventLog).filter(OSEventLog.timestamp < cutoff_date).delete()
         db.commit()
 
 def log_audit_action(machine_id: int, action: str, user: str, details: str, action_id: str = None):

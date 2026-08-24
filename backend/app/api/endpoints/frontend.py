@@ -119,6 +119,17 @@ def get_machine_audit_logs(machine_id: int, db: Session = Depends(get_db), _: st
     with LogSession() as log_db:
         return log_db.query(AuditLog).order_by(AuditLog.timestamp.desc()).limit(100).all()
 
+@router.get("/machines/{machine_id}/logs/events", response_model=List[schemas.OSEventLog])
+def get_machine_os_event_logs(machine_id: int, db: Session = Depends(get_db), _: str = Depends(verify_admin)):
+    machine = db.query(models.Machine).filter(models.Machine.id == machine_id).first()
+    if not machine:
+        raise HTTPException(status_code=404, detail="Machine not found")
+
+    from app.core.logging_db import OSEventLog
+    LogSession = get_log_engine(machine_id)
+    with LogSession() as log_db:
+        return log_db.query(OSEventLog).order_by(OSEventLog.timestamp.desc()).limit(500).all()
+
 @router.get("/machines/{machine_id}/logs/size")
 def get_machine_logs_size(machine_id: int, db: Session = Depends(get_db), _: str = Depends(verify_admin)):
     machine = db.query(models.Machine).filter(models.Machine.id == machine_id).first()
