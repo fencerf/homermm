@@ -25,12 +25,13 @@ const EventLogsModal = ({ machineId, onClose }) => {
         setError("");
         setActionMessage("Requesting event logs from agent (last 5 days, warnings/errors)...");
         try {
-            const taskId = generateUUID();
-            await axios.post(`/api/frontend/machines/${machineId}/tasks`, {
+            const actionId = generateUUID();
+            const createRes = await axios.post(`/api/frontend/machines/${machineId}/tasks`, {
                 task_type: "fetch_event_logs",
                 payload: "{}",
-                action_id: taskId
+                action_id: actionId
             });
+            const taskId = createRes.data.id;
 
             const pollInterval = setInterval(async () => {
                 try {
