@@ -140,6 +140,76 @@ def submit_task_result(machine_id: int, task_id: int, result: schemas.TaskResult
 
     task.status = result.status
     task.result_message = result.result_message
+
+    if task.task_type == "fetch_event_logs" and task.status == "completed" and task.result_message:
+        try:
+            import json
+            from sqlalchemy.exc import IntegrityError
+            from app.core.logging_db import get_log_engine, OSEventLog
+
+            result_data = json.loads(task.result_message)
+            events = result_data.get("events", [])
+            LogSession = get_log_engine(machine_id)
+            with LogSession() as log_db:
+                for ev in events:
+                    import re
+                    # Try parsing timestamp to generic iso string, or fallback to now
+                    try:
+                        ts = ev.get("timestamp", "")
+                        # Handle PowerShell /Date(ms)/ format
+                        match = re.search(r'/Date\((\d+)\)/', ts)
+                        if match:
+                            ms = int(match.group(1))
+                            dt = datetime.utcfromtimestamp(ms / 1000.0)
+                        else:
+                            from dateutil import parser
+                            dt = parser.parse(ts)
+                    except:
+                        dt = datetime.utcnow()
+
+                    new_ev = OSEventLog(
+                        timestamp=dt,
+                        level=ev.get("level", "Unknown"),
+                        message=ev.get("message", ""),
+                        source=ev.get("source", "Unknown")
+                    )
+                    log_db.add(new_ev)
+
+                try:
+                    log_db.commit()
+                except IntegrityError:
+                    log_db.rollback()
+                    # If bulk commit fails due to duplicates, insert one by one
+                    for ev in events:
+                        try:
+                            ts = ev.get("timestamp", "")
+                            match = re.search(r'/Date\((\d+)\)/', ts)
+                            if match:
+                                ms = int(match.group(1))
+                                dt = datetime.utcfromtimestamp(ms / 1000.0)
+                            else:
+                                from dateutil import parser
+                                dt = parser.parse(ts)
+                        except:
+                            dt = datetime.utcnow()
+
+                        new_ev = OSEventLog(
+                            timestamp=dt,
+                            level=ev.get("level", "Unknown"),
+                            message=ev.get("message", ""),
+                            source=ev.get("source", "Unknown")
+                        )
+                        log_db.add(new_ev)
+                        try:
+                            log_db.commit()
+                        except IntegrityError:
+                            log_db.rollback()
+
+            # Clear result message to save space in the main DB since we just moved it
+            task.result_message = json.dumps({"events_stored": len(events)})
+        except Exception as e:
+            print(f"Failed to process event logs into DB: {e}")
+
     task.completed_at = datetime.utcnow()
     db.commit()
     return {"status": "success"}

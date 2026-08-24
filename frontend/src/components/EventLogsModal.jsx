@@ -10,6 +10,16 @@ const EventLogsModal = ({ machineId, onClose }) => {
     const [error, setError] = useState("");
     const [actionMessage, setActionMessage] = useState("");
 
+    const loadStoredEvents = async () => {
+        try {
+            const res = await axios.get(`/api/frontend/machines/${machineId}/logs/events`);
+            setEvents(res.data);
+        } catch (e) {
+            console.error("Failed to load stored events", e);
+            setError("Failed to load stored events.");
+        }
+    };
+
     const fetchEvents = async () => {
         setLoading(true);
         setError("");
@@ -29,13 +39,8 @@ const EventLogsModal = ({ machineId, onClose }) => {
 
                     if (task.status === "completed") {
                         clearInterval(pollInterval);
-                        try {
-                            const resultData = JSON.parse(task.result_message);
-                            setEvents(resultData.events || []);
-                        } catch (e) {
-                            setEvents([]);
-                            setError("Failed to parse event logs.");
-                        }
+                        // Once completed, agent stored the logs in the DB, so we just reload from DB
+                        await loadStoredEvents();
                         setLoading(false);
                         setActionMessage("");
                     } else if (task.status === "failed") {
@@ -68,7 +73,8 @@ const EventLogsModal = ({ machineId, onClose }) => {
     };
 
     useEffect(() => {
-        fetchEvents();
+        // Load initial events from DB instead of triggering a refresh right away
+        loadStoredEvents();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [machineId]);
 

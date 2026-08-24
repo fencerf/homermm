@@ -67,6 +67,17 @@ class AgentLogCreate(BaseModel):
 class AgentLogsBatch(BaseModel):
     logs: List[AgentLogCreate]
 
+class OSEventLog(BaseModel):
+    id: int
+    timestamp: datetime
+    level: str
+    message: str
+    source: str
+
+    class Config:
+        orm_mode = True
+        from_attributes = True
+
 class AgentLog(BaseModel):
     id: int
     timestamp: datetime
