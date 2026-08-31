@@ -70,9 +70,9 @@ class AgentLogsBatch(BaseModel):
 class OSEventLog(BaseModel):
     id: int
     timestamp: datetime
-    level: str
-    message: str
-    source: str
+    level: Optional[str] = None
+    message: Optional[str] = None
+    source: Optional[str] = None
 
     class Config:
         orm_mode = True

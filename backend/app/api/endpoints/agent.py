@@ -169,9 +169,9 @@ def submit_task_result(machine_id: int, task_id: int, result: schemas.TaskResult
 
                     new_ev = OSEventLog(
                         timestamp=dt,
-                        level=ev.get("level", "Unknown"),
-                        message=ev.get("message", ""),
-                        source=ev.get("source", "Unknown")
+                        level=ev.get("level") or "Unknown",
+                        message=ev.get("message") or "",
+                        source=ev.get("source") or "Unknown"
                     )
                     log_db.add(new_ev)
 
@@ -195,9 +195,9 @@ def submit_task_result(machine_id: int, task_id: int, result: schemas.TaskResult
 
                         new_ev = OSEventLog(
                             timestamp=dt,
-                            level=ev.get("level", "Unknown"),
-                            message=ev.get("message", ""),
-                            source=ev.get("source", "Unknown")
+                            level=ev.get("level") or "Unknown",
+                            message=ev.get("message") or "",
+                            source=ev.get("source") or "Unknown"
                         )
                         log_db.add(new_ev)
                         try:
