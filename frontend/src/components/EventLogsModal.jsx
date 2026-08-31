@@ -25,12 +25,13 @@ const EventLogsModal = ({ machineId, onClose }) => {
         setError("");
         setActionMessage("Requesting event logs from agent (last 5 days, warnings/errors)...");
         try {
-            const taskId = generateUUID();
-            await axios.post(`/api/frontend/machines/${machineId}/tasks`, {
+            const actionId = generateUUID();
+            const createRes = await axios.post(`/api/frontend/machines/${machineId}/tasks`, {
                 task_type: "fetch_event_logs",
                 payload: "{}",
-                action_id: taskId
+                action_id: actionId
             });
+            const taskId = createRes.data.id;
 
             const pollInterval = setInterval(async () => {
                 try {
@@ -79,14 +80,14 @@ const EventLogsModal = ({ machineId, onClose }) => {
     }, [machineId]);
 
     const getRowStyle = (level) => {
-        const lowerLevel = level.toLowerCase();
+        const lowerLevel = (level || "").toLowerCase();
         if (lowerLevel.includes('error')) return 'bg-red-900/20 hover:bg-red-900/40 text-red-100';
         if (lowerLevel.includes('warning') || lowerLevel.includes('warn')) return 'bg-yellow-900/20 hover:bg-yellow-900/40 text-yellow-100';
         return 'hover:bg-gray-800 text-gray-200';
     };
 
     const getIcon = (level) => {
-        const lowerLevel = level.toLowerCase();
+        const lowerLevel = (level || "").toLowerCase();
         if (lowerLevel.includes('error')) return <AlertCircle size={16} className="text-red-500 mr-2 flex-shrink-0" />;
         if (lowerLevel.includes('warning') || lowerLevel.includes('warn')) return <AlertTriangle size={16} className="text-yellow-500 mr-2 flex-shrink-0" />;
         return null;
