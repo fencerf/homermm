@@ -14,6 +14,8 @@ import websocket
 import signal
 import sys
 import shutil
+import zipfile
+import tempfile
 
 # Thread-local storage to track the current action ID
 local_data = threading.local()
@@ -40,10 +42,6 @@ class BufferedServerLogHandler(logging.Handler):
             self.handleError(record)
 
 AGENT_VERSION = "1.1.5"
-
-# Environment variables for comms configuration
-COMM_MODE = os.environ.get("COMM_MODE", "sse") # Choices: standard, long_polling, sse, amqp
-AMQP_URL = os.environ.get("AMQP_URL", "amqp://guest:guest@localhost/")
 
 def get_kopia_cmd():
     # If the user explicitly provided a path in config.json
@@ -87,6 +85,10 @@ SERVER_URL = args.server or file_config.get("server") or os.environ.get("SERVER_
 AGENT_API_KEY = file_config.get("api_key") or os.environ.get("AGENT_API_KEY", "dummy_agent_key_123")
 HEADERS = {"x-agent-key": AGENT_API_KEY}
 MACHINE_ID = None
+
+# Comms configuration
+COMM_MODE = file_config.get("comm_mode") or os.environ.get("COMM_MODE", "sse") # Choices: standard, long_polling, sse, amqp
+AMQP_URL = file_config.get("amqp_url") or os.environ.get("AMQP_URL", "amqp://guest:guest@localhost/")
 
 # Configure Logging
 log_level_str = args.log_level or file_config.get("log_level") or os.environ.get("LOG_LEVEL", "INFO")
@@ -714,15 +716,43 @@ def execute_task(task):
         def do_update():
             local_data.action_id = current_action_id # Propagate context to new thread
             try:
-                resp = requests.get(f"{SERVER_URL}/api/agent/download", headers=HEADERS)
+                # 1. Download the zip file
+                resp = requests.get(f"{SERVER_URL}/api/agent/download", headers=HEADERS, stream=True)
                 resp.raise_for_status()
 
-                # Write to self
-                script_path = os.path.abspath(__file__)
-                with open(script_path, "w") as f:
-                    f.write(resp.text)
+                tmp_dir = tempfile.mkdtemp()
+                zip_path = os.path.join(tmp_dir, "agent.zip")
 
-                logger.info("Agent script updated successfully. Restarting process...")
+                with open(zip_path, 'wb') as f:
+                    for chunk in resp.iter_content(chunk_size=8192):
+                        f.write(chunk)
+
+                # 2. Extract the zip file
+                extract_dir = os.path.join(tmp_dir, "extracted")
+                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                    zip_ref.extractall(extract_dir)
+
+                # 3. Copy contents to agent directory
+                agent_dir = os.path.dirname(os.path.abspath(__file__))
+                for item in os.listdir(extract_dir):
+                    s = os.path.join(extract_dir, item)
+                    d = os.path.join(agent_dir, item)
+                    if os.path.isdir(s):
+                        if os.path.exists(d):
+                            shutil.rmtree(d)
+                        shutil.copytree(s, d)
+                    else:
+                        shutil.copy2(s, d)
+
+                # 4. Install requirements if present
+                req_path = os.path.join(agent_dir, "requirements.txt")
+                if os.path.exists(req_path):
+                    logger.info("Installing requirements...")
+                    subprocess.run([sys.executable, "-m", "pip", "install", "-r", req_path], check=True, capture_output=True)
+
+                shutil.rmtree(tmp_dir)
+
+                logger.info("Agent updated successfully. Restarting process...")
                 time.sleep(1) # Allow result to be sent back
 
                 if platform.system() == "Windows":
@@ -732,7 +762,7 @@ def execute_task(task):
                     os._exit(0)
                 else:
                     # Exec replaces the current process natively on Unix
-                    os.execv(sys.executable, [sys.executable, script_path] + sys.argv[1:])
+                    os.execv(sys.executable, [sys.executable, os.path.abspath(__file__)] + sys.argv[1:])
             except Exception as e:
                 logger.error(f"Failed to update agent: {e}")
 
