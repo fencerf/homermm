@@ -771,7 +771,7 @@ def execute_task(task):
                 # Outputting as JSON
                 ps_script = """
                 $startTime = (Get-Date).AddDays(-5)
-                $logs = Get-WinEvent -FilterHashtable @{LogName='System','Application'; Level=2,3; StartTime=$startTime} -MaxEvents 500 -ErrorAction SilentlyContinue | Select-Object TimeCreated, LevelDisplayName, Message, ProviderName | ConvertTo-Json -Compress -Depth 1
+                $logs = Get-WinEvent -FilterHashtable @{LogName='System','Application'; Level=2,3; StartTime=$startTime} -MaxEvents 500 -ErrorAction SilentlyContinue | Select-Object TimeCreated, LevelDisplayName, Message, ProviderName, LogName | ConvertTo-Json -Compress -Depth 1
                 if ($logs) { Write-Output $logs } else { Write-Output "[]" }
                 """
                 result = subprocess.run(["powershell", "-NoProfile", "-Command", ps_script], capture_output=True, text=True)
@@ -783,12 +783,21 @@ def execute_task(task):
                             raw_events = [raw_events]
 
                         for ev in raw_events:
+                            # Determine source format as requested (LogName - ProviderName unless duplicate)
+                            log_name = ev.get("LogName", "Windows")
+                            provider = ev.get("ProviderName", "")
+
+                            if provider and provider != log_name:
+                                source_val = f"{log_name} - {provider}"
+                            else:
+                                source_val = log_name
+
                             # LevelDisplayName is often "Warning" or "Error"
                             events.append({
                                 "timestamp": ev.get("TimeCreated", ""),
                                 "level": ev.get("LevelDisplayName", "Warning"),
                                 "message": ev.get("Message", ""),
-                                "source": ev.get("ProviderName", "Windows")
+                                "source": source_val
                             })
                     except json.JSONDecodeError:
                         logger.error(f"Failed to parse PowerShell event logs: {result.stdout}")
