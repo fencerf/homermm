@@ -17,7 +17,6 @@ function MachineDetails() {
     const [updates, setUpdates] = useState([]);
     const [kopiaPaths, setKopiaPaths] = useState("");
     const [installPackageId, setInstallPackageId] = useState("");
-    const [uninstallPackageId, setUninstallPackageId] = useState("");
     const [scheduleDate, setScheduleDate] = useState("");
     const [actionMessage, setActionMessage] = useState("");
     const [isBrowserOpen, setIsBrowserOpen] = useState(false);
@@ -165,12 +164,15 @@ function MachineDetails() {
         }
     };
 
-    const handleUninstallSoftware = async (e) => {
-        e.preventDefault();
+    const handleUninstallSoftware = async (packageName) => {
+        if (!window.confirm(`Are you sure you want to completely uninstall ${packageName}?`)) {
+            return;
+        }
+
         try {
             const taskData = {
                 task_type: "uninstall_software",
-                payload: JSON.stringify({ package_name: uninstallPackageId }),
+                payload: JSON.stringify({ package_name: packageName }),
                 action_id: generateUUID()
             };
             if (scheduleDate) {
@@ -178,8 +180,7 @@ function MachineDetails() {
             }
             const res = await axios.post(`/api/frontend/machines/${id}/tasks`, taskData);
             setActiveTasks(prev => [...prev, res.data.id]);
-            setActionMessage(`Task to uninstall ${uninstallPackageId} submitted!${scheduleDate ? ' (Scheduled)' : ''}`);
-            setUninstallPackageId("");
+            setActionMessage(`Task to uninstall ${packageName} submitted!${scheduleDate ? ' (Scheduled)' : ''}`);
             setScheduleDate("");
             setTimeout(() => setActionMessage(""), 3000);
 
@@ -419,13 +420,20 @@ function MachineDetails() {
                                                     <td className="px-4 py-2 font-medium text-gray-900" title={update.description}>{update.package_name}</td>
                                                     <td className="px-4 py-2 text-gray-500">{update.current_version || '-'}</td>
                                                     <td className="px-4 py-2 text-blue-600 font-semibold">{update.new_version}</td>
-                                                    <td className="px-4 py-2">
+                                                    <td className="px-4 py-2 space-x-2">
                                                         <button
                                                             onClick={() => handleInstallUpdate(update.package_name)}
                                                             disabled={activeTasks.length > 0}
                                                             className="text-blue-600 hover:text-blue-900 text-xs font-semibold px-2 py-1 border border-blue-200 rounded hover:bg-blue-50 disabled:opacity-50"
                                                         >
-                                                            Install
+                                                            Update
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleUninstallSoftware(update.package_name)}
+                                                            disabled={activeTasks.length > 0}
+                                                            className="text-red-600 hover:text-red-900 text-xs font-semibold px-2 py-1 border border-red-200 rounded hover:bg-red-50 disabled:opacity-50"
+                                                        >
+                                                            Remove
                                                         </button>
                                                     </td>
                                                 </tr>
@@ -451,24 +459,6 @@ function MachineDetails() {
                                         />
                                         <button type="submit" disabled={activeTasks.length > 0} className="flex items-center bg-blue-600 text-white px-4 py-1.5 rounded text-sm hover:bg-blue-700 disabled:opacity-50 min-w-[100px] justify-center">
                                             <RefreshCw size={14} className={`mr-2 ${activeTasks.length > 0 ? 'animate-spin block' : 'hidden'}`} /> Install
-                                        </button>
-                                    </form>
-                                </div>
-
-                                <div>
-                                    <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-2">Uninstall Software (Winget)</h3>
-                                    <form onSubmit={handleUninstallSoftware} className="flex space-x-2">
-                                        <input
-                                            type="text"
-                                            value={uninstallPackageId}
-                                            onChange={(e) => setUninstallPackageId(e.target.value)}
-                                            disabled={activeTasks.length > 0}
-                                            placeholder="Enter Winget Package ID (e.g. Mozilla.Firefox)"
-                                            className="flex-grow px-3 py-1.5 border rounded text-sm focus:ring-blue-500 disabled:opacity-50"
-                                            required
-                                        />
-                                        <button type="submit" disabled={activeTasks.length > 0} className="flex items-center bg-red-600 text-white px-4 py-1.5 rounded text-sm hover:bg-red-700 disabled:opacity-50 min-w-[100px] justify-center">
-                                            <RefreshCw size={14} className={`mr-2 ${activeTasks.length > 0 ? 'animate-spin block' : 'hidden'}`} /> Uninstall
                                         </button>
                                     </form>
                                 </div>
