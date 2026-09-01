@@ -446,14 +446,14 @@ function MachineDetails() {
                             {/* Install New Software Form */}
                             <div className="pt-4 border-t flex flex-col space-y-4">
                                 <div>
-                                    <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-2">Install New Software (Winget)</h3>
+                                    <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-2">Install New Software (Package Manager)</h3>
                                     <form onSubmit={handleInstallNewSoftware} className="flex space-x-2">
                                         <input
                                             type="text"
                                             value={installPackageId}
                                             onChange={(e) => setInstallPackageId(e.target.value)}
                                             disabled={activeTasks.length > 0}
-                                            placeholder="Enter Winget Package ID (e.g. Mozilla.Firefox)"
+                                            placeholder="Enter Package ID (e.g. Mozilla.Firefox or firefox)"
                                             className="flex-grow px-3 py-1.5 border rounded text-sm focus:ring-blue-500 disabled:opacity-50"
                                             required
                                         />
