@@ -20,7 +20,12 @@ import tempfile
 # Thread-local storage to track the current action ID
 local_data = threading.local()
 
-import agent_comm
+HAS_COMM_MODULE = False
+try:
+    import agent_comm
+    HAS_COMM_MODULE = True
+except ImportError:
+    pass
 
 # Logging setup
 log_buffer = []
@@ -717,7 +722,7 @@ def execute_task(task):
             local_data.action_id = current_action_id # Propagate context to new thread
             try:
                 # 1. Download the zip file
-                resp = requests.get(f"{SERVER_URL}/api/agent/download", headers=HEADERS, stream=True)
+                resp = requests.get(f"{SERVER_URL}/api/agent/download?format=zip", headers=HEADERS, stream=True)
                 resp.raise_for_status()
 
                 tmp_dir = tempfile.mkdtemp()
@@ -877,6 +882,15 @@ def main_loop():
 
     # Start heartbeat in background
     threading.Thread(target=heartbeat_loop, daemon=True).start()
+
+    if not HAS_COMM_MODULE:
+        logger.warning("agent_comm module not found. This agent is running in legacy fallback mode.")
+        logger.info("Triggering automatic self-update to download complete package...")
+        # Synthesize an update task to trigger the zip download and extraction
+        execute_task({"task_type": "update_agent"})
+        # The update task runs in a background thread, so we'll just sleep and wait for the restart
+        while True:
+            time.sleep(1)
 
     logger.info(f"Registered as Machine ID: {MACHINE_ID}. Starting {COMM_MODE} listener...")
 

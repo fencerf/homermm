@@ -36,11 +36,20 @@ def get_agent_dir_path():
         return prod_path
     return dev_path
 
+from fastapi import Query
+
 @router.get("/download")
-def download_agent(background_tasks: BackgroundTasks, _: str = Depends(verify_agent_key)):
+def download_agent(background_tasks: BackgroundTasks, format: str = Query("py"), _: str = Depends(verify_agent_key)):
     agent_dir = get_agent_dir_path()
     if not os.path.exists(agent_dir):
         raise HTTPException(status_code=404, detail="Agent directory not found")
+
+    if format != "zip":
+        # Backward compatibility for older agents that expect just agent.py
+        agent_path = os.path.join(agent_dir, "agent.py")
+        if not os.path.exists(agent_path):
+            raise HTTPException(status_code=404, detail="Agent file not found")
+        return FileResponse(agent_path, filename="agent.py")
 
     # Create a temporary zip file
     tmp_dir = tempfile.mkdtemp()
