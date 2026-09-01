@@ -18,6 +18,8 @@ import shutil
 # Thread-local storage to track the current action ID
 local_data = threading.local()
 
+import agent_comm
+
 # Logging setup
 log_buffer = []
 log_buffer_lock = threading.Lock()
@@ -37,7 +39,11 @@ class BufferedServerLogHandler(logging.Handler):
         except Exception:
             self.handleError(record)
 
-AGENT_VERSION = "1.1.4"
+AGENT_VERSION = "1.1.5"
+
+# Environment variables for comms configuration
+COMM_MODE = os.environ.get("COMM_MODE", "sse") # Choices: standard, long_polling, sse, amqp
+AMQP_URL = os.environ.get("AMQP_URL", "amqp://guest:guest@localhost/")
 
 def get_kopia_cmd():
     # If the user explicitly provided a path in config.json
@@ -803,6 +809,21 @@ def handle_exit_signal(signum, frame):
     logger.info(f"Received signal {signum}. Gracefully shutting down...")
     sys.exit(0)
 
+def heartbeat_loop():
+    """Background thread to periodically send registration/heartbeats"""
+    global MACHINE_ID
+    while True:
+        try:
+            sys_info = get_system_info()
+            resp = requests.post(f"{SERVER_URL}/api/agent/register", json=sys_info, headers=HEADERS)
+            resp.raise_for_status()
+            machine_data = resp.json()
+            MACHINE_ID = machine_data["id"]
+        except Exception as e:
+            logger.error(f"Heartbeat error: {e}")
+        # Send heartbeat every 60 seconds
+        time.sleep(60)
+
 def main_loop():
     global MACHINE_ID
 
@@ -812,37 +833,42 @@ def main_loop():
 
     logger.info(f"Agent starting... Connecting to {SERVER_URL}")
 
-    while True:
+    # 1. Initial Registration
+    while MACHINE_ID is None:
         try:
-            # 1. Register / Heartbeat
             sys_info = get_system_info()
             resp = requests.post(f"{SERVER_URL}/api/agent/register", json=sys_info, headers=HEADERS)
             resp.raise_for_status()
             machine_data = resp.json()
             MACHINE_ID = machine_data["id"]
-
-            # 2. Check updates conditionally (only once on startup or when explicitly tasked)
-            # Actually, to avoid excessive CPU, we'll only do it via the explicit check_updates task.
-            # We skip periodic automatic updates here since they are very heavy.
-
-            # 3. Fetch and execute tasks
-            resp = requests.get(f"{SERVER_URL}/api/agent/{MACHINE_ID}/tasks", headers=HEADERS)
-            tasks = resp.json()
-
-            for task in tasks:
-                local_data.action_id = task.get("action_id") # Set context explicitly before logging
-                logger.info(f"Executing task: {task['task_type']}")
-                status, msg = execute_task(task)
-                requests.post(f"{SERVER_URL}/api/agent/{MACHINE_ID}/tasks/{task['id']}/result", json={"status": status, "result_message": msg}, headers=HEADERS)
-                local_data.action_id = None # Clear context
-
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error communicating with server: {e}")
         except Exception as e:
-            logger.error(f"Unexpected error: {e}")
+            logger.error(f"Initial registration failed: {e}. Retrying in 5 seconds...")
+            time.sleep(5)
 
-        # Fast polling interval for interactive features
-        time.sleep(5)
+    # Start heartbeat in background
+    threading.Thread(target=heartbeat_loop, daemon=True).start()
+
+    logger.info(f"Registered as Machine ID: {MACHINE_ID}. Starting {COMM_MODE} listener...")
+
+    # 2. Start Listener
+    listener = None
+    if COMM_MODE == "standard":
+        listener = agent_comm.StandardPollingListener(SERVER_URL, HEADERS, MACHINE_ID, execute_task)
+    elif COMM_MODE == "long_polling":
+        listener = agent_comm.LongPollingListener(SERVER_URL, HEADERS, MACHINE_ID, execute_task)
+    elif COMM_MODE == "sse":
+        listener = agent_comm.SSEListener(SERVER_URL, HEADERS, MACHINE_ID, execute_task)
+    elif COMM_MODE == "amqp":
+        listener = agent_comm.AMQPListener(AMQP_URL, SERVER_URL, HEADERS, MACHINE_ID, execute_task)
+    else:
+        logger.error(f"Unknown COMM_MODE: {COMM_MODE}. Falling back to standard polling.")
+        listener = agent_comm.StandardPollingListener(SERVER_URL, HEADERS, MACHINE_ID, execute_task)
+
+    try:
+        listener.start()
+    except KeyboardInterrupt:
+        logger.info("Interrupt received, stopping listener...")
+        listener.stop()
 
 # Windows Service Class Definition
 # This must be defined at the module level so the Service Control Manager can import it

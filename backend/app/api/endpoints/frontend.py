@@ -10,6 +10,7 @@ from app.core.logging_db import log_audit_action, get_log_engine, AgentLog, Audi
 from app.models import database as models
 from app.schemas import schemas
 from app.core.websocket_manager import manager
+from app.core.agent_events import agent_events
 from fastapi import WebSocket, WebSocketDisconnect, Query
 from fastapi.responses import FileResponse
 import re
@@ -58,7 +59,7 @@ def get_machine_updates(machine_id: int, db: Session = Depends(get_db), _: str =
     return db.query(models.PendingUpdate).filter(models.PendingUpdate.machine_id == machine_id).all()
 
 @router.post("/machines/{machine_id}/tasks", response_model=schemas.AgentTask)
-def create_task(machine_id: int, task: schemas.AgentTaskCreate, db: Session = Depends(get_db), _: str = Depends(verify_admin)):
+async def create_task(machine_id: int, task: schemas.AgentTaskCreate, db: Session = Depends(get_db), _: str = Depends(verify_admin)):
     db_machine = db.query(models.Machine).filter(models.Machine.id == machine_id).first()
     if not db_machine:
         raise HTTPException(status_code=404, detail="Machine not found")
@@ -86,6 +87,18 @@ def create_task(machine_id: int, task: schemas.AgentTaskCreate, db: Session = De
         details=f"Task ID: {db_task.id}, Payload: {task.payload}",
         action_id=task.action_id
     )
+
+    # Notify connected agent listeners (SSE, Long Polling, etc)
+    task_data = {
+        "id": db_task.id,
+        "machine_id": db_task.machine_id,
+        "task_type": db_task.task_type,
+        "payload": db_task.payload,
+        "scheduled_for": db_task.scheduled_for.isoformat() if db_task.scheduled_for else None,
+        "action_id": db_task.action_id,
+        "status": db_task.status,
+    }
+    await agent_events.notify_task_created(machine_id, task_data)
 
     return db_task
 

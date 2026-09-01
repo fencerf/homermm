@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException, Header, Request
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime
 import json
+import asyncio
 
 from app.core.database import get_db
 from app.models import database as models
@@ -10,6 +11,8 @@ from app.schemas import schemas
 from app.core.logging_db import get_log_engine, AgentLog, enforce_log_retention
 from app.core.websocket_manager import manager
 from fastapi import WebSocket, WebSocketDisconnect
+from app.core.agent_events import agent_events
+from sse_starlette.sse import EventSourceResponse
 
 import os
 from fastapi.responses import FileResponse
@@ -92,25 +95,71 @@ def submit_updates(machine_id: int, updates: List[schemas.PendingUpdateCreate], 
 
 from sqlalchemy import or_
 
-@router.get("/{machine_id}/tasks", response_model=List[schemas.AgentTask])
-def get_pending_tasks(machine_id: int, db: Session = Depends(get_db), _: str = Depends(verify_agent_key)):
-    now = datetime.utcnow()
-    tasks = db.query(models.AgentTask).filter(
-        models.AgentTask.machine_id == machine_id,
-        models.AgentTask.status == "pending",
-        or_(
-            models.AgentTask.scheduled_for == None,
-            models.AgentTask.scheduled_for <= now
-        )
-    ).all()
+from fastapi import Query
 
-    # Mark as in progress once fetched
-    for task in tasks:
-        task.status = "in_progress"
-    if tasks:
-        db.commit()
+@router.get("/{machine_id}/tasks", response_model=List[schemas.AgentTask])
+async def get_pending_tasks(machine_id: int, timeout: Optional[int] = Query(None), db: Session = Depends(get_db), _: str = Depends(verify_agent_key)):
+    now = datetime.utcnow()
+
+    def fetch_tasks():
+        tasks = db.query(models.AgentTask).filter(
+            models.AgentTask.machine_id == machine_id,
+            models.AgentTask.status == "pending",
+            or_(
+                models.AgentTask.scheduled_for == None,
+                models.AgentTask.scheduled_for <= now
+            )
+        ).all()
+
+        # Mark as in progress once fetched
+        for task in tasks:
+            task.status = "in_progress"
+        if tasks:
+            db.commit()
+
+        return tasks
+
+    tasks = fetch_tasks()
+
+    if not tasks and timeout:
+        queue = agent_events.get_queue(machine_id)
+        try:
+            # Wait for a new task using asyncio.wait_for
+            await asyncio.wait_for(queue.get(), timeout=timeout)
+            # Re-fetch tasks after being notified
+            tasks = fetch_tasks()
+        except asyncio.TimeoutError:
+            pass
 
     return tasks
+
+@router.get("/{machine_id}/tasks/stream")
+async def stream_pending_tasks(request: Request, machine_id: int, db: Session = Depends(get_db), _: str = Depends(verify_agent_key)):
+    async def event_generator():
+        queue = agent_events.get_queue(machine_id)
+        while True:
+            # Check for client disconnect
+            if await request.is_disconnected():
+                break
+
+            try:
+                # Wait for a new task from the queue
+                task_data = await asyncio.wait_for(queue.get(), timeout=10.0)
+                yield {
+                    "event": "new_task",
+                    "data": json.dumps(task_data)
+                }
+            except asyncio.TimeoutError:
+                # Keep-alive to prevent connection closure
+                yield {
+                    "event": "keep_alive",
+                    "data": "{}"
+                }
+            except Exception as e:
+                break
+
+    return EventSourceResponse(event_generator())
+
 
 from fastapi import Query
 
