@@ -17,6 +17,7 @@ function MachineDetails() {
     const [updates, setUpdates] = useState([]);
     const [kopiaPaths, setKopiaPaths] = useState("");
     const [installPackageId, setInstallPackageId] = useState("");
+    const [uninstallPackageId, setUninstallPackageId] = useState("");
     const [scheduleDate, setScheduleDate] = useState("");
     const [actionMessage, setActionMessage] = useState("");
     const [isBrowserOpen, setIsBrowserOpen] = useState(false);
@@ -161,6 +162,36 @@ function MachineDetails() {
 
         } catch (error) {
             console.error("Error scheduling install", error);
+        }
+    };
+
+    const handleUninstallSoftware = async (e) => {
+        e.preventDefault();
+        try {
+            const taskData = {
+                task_type: "uninstall_software",
+                payload: JSON.stringify({ package_name: uninstallPackageId }),
+                action_id: generateUUID()
+            };
+            if (scheduleDate) {
+                taskData.scheduled_for = new Date(scheduleDate).toISOString();
+            }
+            const res = await axios.post(`/api/frontend/machines/${id}/tasks`, taskData);
+            setActiveTasks(prev => [...prev, res.data.id]);
+            setActionMessage(`Task to uninstall ${uninstallPackageId} submitted!${scheduleDate ? ' (Scheduled)' : ''}`);
+            setUninstallPackageId("");
+            setScheduleDate("");
+            setTimeout(() => setActionMessage(""), 3000);
+
+            // Re-fetch updates list shortly after submitting task
+            setTimeout(async () => {
+                try {
+                    const updatesRes = await axios.get(`/api/frontend/machines/${id}/updates`);
+                    setUpdates(updatesRes.data);
+                } catch(e){}
+            }, 3000);
+        } catch (error) {
+            console.error("Error scheduling uninstallation", error);
         }
     };
 
@@ -405,22 +436,42 @@ function MachineDetails() {
                             )}
 
                             {/* Install New Software Form */}
-                            <div className="pt-4 border-t">
-                                <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-2">Install New Software (Winget)</h3>
-                                <form onSubmit={handleInstallNewSoftware} className="flex space-x-2">
-                                    <input
-                                        type="text"
-                                        value={installPackageId}
-                                        onChange={(e) => setInstallPackageId(e.target.value)}
-                                        disabled={activeTasks.length > 0}
-                                        placeholder="Enter Winget Package ID (e.g. Mozilla.Firefox)"
-                                        className="flex-grow px-3 py-1.5 border rounded text-sm focus:ring-blue-500 disabled:opacity-50"
-                                        required
-                                    />
-                                    <button type="submit" disabled={activeTasks.length > 0} className="flex items-center bg-blue-600 text-white px-4 py-1.5 rounded text-sm hover:bg-blue-700 disabled:opacity-50">
-                                        <RefreshCw size={14} className={`mr-2 ${activeTasks.length > 0 ? 'animate-spin block' : 'hidden'}`} /> Install
-                                    </button>
-                                </form>
+                            <div className="pt-4 border-t flex flex-col space-y-4">
+                                <div>
+                                    <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-2">Install New Software (Winget)</h3>
+                                    <form onSubmit={handleInstallNewSoftware} className="flex space-x-2">
+                                        <input
+                                            type="text"
+                                            value={installPackageId}
+                                            onChange={(e) => setInstallPackageId(e.target.value)}
+                                            disabled={activeTasks.length > 0}
+                                            placeholder="Enter Winget Package ID (e.g. Mozilla.Firefox)"
+                                            className="flex-grow px-3 py-1.5 border rounded text-sm focus:ring-blue-500 disabled:opacity-50"
+                                            required
+                                        />
+                                        <button type="submit" disabled={activeTasks.length > 0} className="flex items-center bg-blue-600 text-white px-4 py-1.5 rounded text-sm hover:bg-blue-700 disabled:opacity-50 min-w-[100px] justify-center">
+                                            <RefreshCw size={14} className={`mr-2 ${activeTasks.length > 0 ? 'animate-spin block' : 'hidden'}`} /> Install
+                                        </button>
+                                    </form>
+                                </div>
+
+                                <div>
+                                    <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-2">Uninstall Software (Winget)</h3>
+                                    <form onSubmit={handleUninstallSoftware} className="flex space-x-2">
+                                        <input
+                                            type="text"
+                                            value={uninstallPackageId}
+                                            onChange={(e) => setUninstallPackageId(e.target.value)}
+                                            disabled={activeTasks.length > 0}
+                                            placeholder="Enter Winget Package ID (e.g. Mozilla.Firefox)"
+                                            className="flex-grow px-3 py-1.5 border rounded text-sm focus:ring-blue-500 disabled:opacity-50"
+                                            required
+                                        />
+                                        <button type="submit" disabled={activeTasks.length > 0} className="flex items-center bg-red-600 text-white px-4 py-1.5 rounded text-sm hover:bg-red-700 disabled:opacity-50 min-w-[100px] justify-center">
+                                            <RefreshCw size={14} className={`mr-2 ${activeTasks.length > 0 ? 'animate-spin block' : 'hidden'}`} /> Uninstall
+                                        </button>
+                                    </form>
+                                </div>
                             </div>
 
                             {/* OS Updates */}

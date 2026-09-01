@@ -414,6 +414,31 @@ def execute_task(task):
             execute_task({"task_type": "check_updates"})
         return status, msg
 
+    elif task_type == "uninstall_software":
+        package = payload_data.get("package_name")
+        if not package:
+            return "failed", "No package name provided for uninstallation."
+
+        status, msg = "failed", "Unknown"
+        os_name = platform.system()
+        if os_name == "Windows":
+            cmd = ["winget", "uninstall", "--id", package, "--silent", "--accept-source-agreements"]
+            logger.info(f"Running Winget uninstall command: {' '.join(cmd)}")
+            try:
+                result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+                logger.info(f"Winget Uninstall Output:\n{result.stdout}")
+                status, msg = "completed", f"Uninstalled {package}"
+            except subprocess.CalledProcessError as e:
+                logger.error(f"Winget Uninstall Failed:\n{e.stderr or e.stdout}")
+                status, msg = "failed", f"Failed to uninstall {package}: {e.stderr or e.stdout}"
+        else:
+            status, msg = "failed", "Software uninstallation via agent is currently only supported on Windows using winget."
+
+        if status == "completed":
+            # Refresh updates list
+            execute_task({"task_type": "check_updates"})
+        return status, msg
+
     elif task_type == "install_software":
         package = payload_data.get("package_name")
         if not package:
