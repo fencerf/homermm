@@ -197,17 +197,17 @@ def get_server_timezone(_: str = Depends(verify_admin)):
     tz = os.environ.get("TZ", "UTC")
     return {"timezone": tz}
 
-def get_agent_path():
+def get_agent_dir_path():
     # Dev path (host machine) vs Docker path
-    dev_path = os.path.join(os.path.dirname(__file__), "../../../../agent/agent.py")
-    prod_path = os.path.join(os.path.dirname(__file__), "../../../agent/agent.py") # /app/app/api/endpoints -> /app/agent/agent.py
+    dev_path = os.path.join(os.path.dirname(__file__), "../../../../agent")
+    prod_path = os.path.join(os.path.dirname(__file__), "../../../agent")
     if os.path.exists(prod_path):
         return prod_path
     return dev_path
 
 @router.get("/agent/version")
 def get_latest_agent_version(_: str = Depends(verify_admin)):
-    agent_path = get_agent_path()
+    agent_path = os.path.join(get_agent_dir_path(), "agent.py")
     try:
         with open(agent_path, "r") as f:
             content = f.read()
@@ -218,12 +218,33 @@ def get_latest_agent_version(_: str = Depends(verify_admin)):
         pass
     return {"version": "unknown"}
 
+import shutil
+import tempfile
+from fastapi import BackgroundTasks
+
 @router.get("/agent/download")
-def download_agent_frontend(_: str = Depends(verify_admin)):
-    agent_path = get_agent_path()
-    if not os.path.exists(agent_path):
-        raise HTTPException(status_code=404, detail="Agent file not found")
-    return FileResponse(agent_path, filename="agent.py")
+def download_agent_frontend(background_tasks: BackgroundTasks, _: str = Depends(verify_admin)):
+    agent_dir = get_agent_dir_path()
+    if not os.path.exists(agent_dir):
+        raise HTTPException(status_code=404, detail="Agent directory not found")
+
+    # Create a temporary zip file
+    tmp_dir = tempfile.mkdtemp()
+    zip_path = os.path.join(tmp_dir, "agent")
+
+    # Copy files manually to exclude unwanted directories
+    zip_source_dir = os.path.join(tmp_dir, "agent_src")
+
+    def ignore_patterns(dir_path, filenames):
+        return [n for n in filenames if n in ["__pycache__", "venv"]]
+
+    shutil.copytree(agent_dir, zip_source_dir, ignore=ignore_patterns)
+    shutil.make_archive(zip_path, 'zip', zip_source_dir)
+
+    # Schedule cleanup of the temporary directory after the file is served
+    background_tasks.add_task(shutil.rmtree, tmp_dir)
+
+    return FileResponse(f"{zip_path}.zip", filename="agent.zip", media_type="application/zip")
 
 @router.get("/settings", response_model=List[schemas.GlobalSettings])
 def get_settings(db: Session = Depends(get_db), _: str = Depends(verify_admin)):
