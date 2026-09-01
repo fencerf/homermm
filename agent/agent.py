@@ -95,6 +95,8 @@ MACHINE_ID = None
 COMM_MODE = file_config.get("comm_mode") or os.environ.get("COMM_MODE", "sse") # Choices: standard, long_polling, sse, amqp
 AMQP_URL = file_config.get("amqp_url") or os.environ.get("AMQP_URL", "amqp://guest:guest@localhost/")
 
+LOG_FLUSH_INTERVAL = int(file_config.get("log_flush_interval") or os.environ.get("LOG_FLUSH_INTERVAL", "1800"))
+
 # Configure Logging
 log_level_str = args.log_level or file_config.get("log_level") or os.environ.get("LOG_LEVEL", "INFO")
 log_file_str = args.log_file or file_config.get("log_file") or os.environ.get("LOG_FILE")
@@ -111,34 +113,42 @@ logging.basicConfig(
 )
 logger = logging.getLogger("hcms_agent")
 
-def send_logs_to_server():
+# Event to explicitly trigger a log flush
+log_flush_event = threading.Event()
+
+def _flush_logs_now():
     global MACHINE_ID
-    while True:
-        time.sleep(10)
-        if MACHINE_ID is None:
-            continue
+    if MACHINE_ID is None:
+        return
 
-        with log_buffer_lock:
-            if not log_buffer:
-                continue
-            batch = log_buffer[:]
-            log_buffer.clear()
+    with log_buffer_lock:
+        if not log_buffer:
+            return
+        batch = log_buffer[:]
+        log_buffer.clear()
 
-        try:
-            response = requests.post(
-                f"{SERVER_URL}/api/agent/{MACHINE_ID}/logs",
-                json={"logs": batch},
-                headers=HEADERS,
-                timeout=5
-            )
-            if response.status_code != 200:
-                # If failed, push back to buffer
-                with log_buffer_lock:
-                    log_buffer.extend(batch)
-        except Exception as e:
+    try:
+        response = requests.post(
+            f"{SERVER_URL}/api/agent/{MACHINE_ID}/logs",
+            json={"logs": batch},
+            headers=HEADERS,
+            timeout=5
+        )
+        if response.status_code != 200:
             # If failed, push back to buffer
             with log_buffer_lock:
                 log_buffer.extend(batch)
+    except Exception as e:
+        # If failed, push back to buffer
+        with log_buffer_lock:
+            log_buffer.extend(batch)
+
+def send_logs_to_server():
+    while True:
+        # Wait until timeout occurs or event is set explicitly
+        log_flush_event.wait(LOG_FLUSH_INTERVAL)
+        log_flush_event.clear()
+        _flush_logs_now()
 
 # Start logging thread
 threading.Thread(target=send_logs_to_server, daemon=True).start()
@@ -347,7 +357,12 @@ def execute_task(task):
     except:
         payload_data = {}
 
-    if task_type == "check_updates":
+    if task_type == "flush_logs":
+        logger.info("Received request to flush logs immediately.")
+        log_flush_event.set()
+        return "completed", "Logs flushed successfully."
+
+    elif task_type == "check_updates":
         logger.info("Received request to check for updates.")
         global MACHINE_ID
         if MACHINE_ID:
