@@ -207,7 +207,15 @@ async def websocket_agent_endpoint(websocket: WebSocket, machine_id: int, token:
         manager.disconnect_agent(machine_id)
 
 @router.post("/{machine_id}/tasks/{task_id}/result")
-def submit_task_result(machine_id: int, task_id: int, result: schemas.TaskResultBody, db: Session = Depends(get_db), _: str = Depends(verify_agent_key)):
+def submit_task_result(
+    machine_id: int,
+    task_id: int,
+    result: Optional[schemas.TaskResultBody] = None,
+    status: Optional[str] = Query(None),
+    result_message: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    _: str = Depends(verify_agent_key)
+):
     task = db.query(models.AgentTask).filter(
         models.AgentTask.id == task_id,
         models.AgentTask.machine_id == machine_id
@@ -216,8 +224,15 @@ def submit_task_result(machine_id: int, task_id: int, result: schemas.TaskResult
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    task.status = result.status
-    task.result_message = result.result_message
+    # Support both new JSON body and legacy query parameters
+    if result:
+        task.status = result.status
+        task.result_message = result.result_message
+    elif status:
+        task.status = status
+        task.result_message = result_message
+    else:
+        raise HTTPException(status_code=422, detail="Missing result body or status parameter")
 
     if task.task_type == "fetch_event_logs" and task.status == "completed" and task.result_message:
         try:
