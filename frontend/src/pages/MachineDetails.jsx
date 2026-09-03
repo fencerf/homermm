@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Cpu, HardDrive, Database, RefreshCw, Archive, FolderSearch, Terminal } from 'lucide-react';
+import { ArrowLeft, Cpu, HardDrive, Database, RefreshCw, Archive, FolderSearch, Terminal, List, Clock } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import RemoteFileBrowser from '../components/RemoteFileBrowser';
 import MachineLogsModal from '../components/MachineLogsModal';
@@ -26,6 +26,7 @@ function MachineDetails() {
     const [editingFilePath, setEditingFilePath] = useState(null);
     const [latestAgentVersion, setLatestAgentVersion] = useState("");
     const [activeTasks, setActiveTasks] = useState([]);
+    const [activeTab, setActiveTab] = useState('overview'); // Add active tab state
 
     useEffect(() => {
         fetchServerTimezone();
@@ -243,7 +244,42 @@ function MachineDetails() {
                 </div>
             )}
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Tab Navigation */}
+            <div className="flex space-x-1 border-b border-gray-200 mb-6 bg-white p-1 rounded-t-lg shadow-sm">
+                <button
+                    onClick={() => setActiveTab('overview')}
+                    className={`flex items-center px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                        activeTab === 'overview'
+                            ? 'bg-blue-100 text-blue-700'
+                            : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+                    }`}
+                >
+                    <List size={16} className="mr-2" /> Overview
+                </button>
+                <button
+                    onClick={() => setActiveTab('backups')}
+                    className={`flex items-center px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                        activeTab === 'backups'
+                            ? 'bg-blue-100 text-blue-700'
+                            : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+                    }`}
+                >
+                    <Archive size={16} className="mr-2" /> Backups
+                </button>
+                <button
+                    onClick={() => setActiveTab('scheduled_tasks')}
+                    className={`flex items-center px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                        activeTab === 'scheduled_tasks'
+                            ? 'bg-blue-100 text-blue-700'
+                            : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+                    }`}
+                >
+                    <Clock size={16} className="mr-2" /> Scheduled Tasks
+                </button>
+            </div>
+
+            {/* Tab Content */}
+            <div className={`${activeTab === 'overview' ? 'grid grid-cols-1 lg:grid-cols-3 gap-6' : 'hidden'}`}>
                 {/* Hardware Info Panel */}
                 <div className="bg-white p-6 rounded-lg shadow-md border border-gray-200">
                     <div className="flex justify-between items-center border-b pb-2 mb-4">
@@ -489,11 +525,15 @@ function MachineDetails() {
                     )}
                 </div>
 
-                {/* Kopia Backup Panel */}
-                <div className="bg-white p-6 rounded-lg shadow-md border border-gray-200 lg:col-span-3">
+            </div> {/* End of Overview Grid */}
+
+            {/* Backups Tab */}
+            <div className={`${activeTab === 'backups' ? 'block' : 'hidden'}`}>
+                {/* Backup Panel */}
+                <div className="bg-white p-6 rounded-lg shadow-md border border-gray-200">
                     <div className="flex items-center mb-4 border-b pb-2">
                         <Archive className="text-purple-600 mr-2" size={24} />
-                        <h2 className="text-xl font-bold">Configure Kopia Backups</h2>
+                        <h2 className="text-xl font-bold">Configure Backups</h2>
                     </div>
                     <form onSubmit={handleConfigureKopia} className="space-y-4">
                         <div>
@@ -519,11 +559,11 @@ function MachineDetails() {
                             </div>
                         </div>
                         <button type="submit" className="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700 transition-colors">
-                            Push Kopia Config to Agent
+                            Push Backup Config to Agent
                         </button>
                     </form>
                     <p className="mt-4 text-sm text-gray-500 italic mb-4">
-                        Note: Kopia server connection settings are managed globally in Settings.
+                        Note: Backup server connection settings are managed globally in Settings.
                     </p>
 
                     {machine.kopia_config && (
@@ -574,6 +614,21 @@ function MachineDetails() {
                             )}
                         </div>
                     )}
+                </div>
+            </div>
+
+            {/* Scheduled Tasks Tab Placeholder */}
+            <div className={`${activeTab === 'scheduled_tasks' ? 'block' : 'hidden'}`}>
+                <div className="bg-white p-6 rounded-lg shadow-md border border-gray-200">
+                    <div className="flex justify-between items-center mb-4 border-b pb-2">
+                        <div className="flex items-center">
+                            <Clock className="text-blue-600 mr-2" size={24} />
+                            <h2 className="text-xl font-bold">Scheduled Tasks</h2>
+                        </div>
+                    </div>
+                    <div className="text-gray-500 py-8 text-center bg-gray-50 rounded border border-dashed border-gray-300">
+                        No tasks scheduled yet.
+                    </div>
                 </div>
             </div>
 
