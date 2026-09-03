@@ -112,6 +112,15 @@ def get_task(machine_id: int, task_id: int, db: Session = Depends(get_db), _: st
         raise HTTPException(status_code=404, detail="Task not found")
     return task
 
+
+@router.get("/machines/{machine_id}/scheduled-tasks", response_model=List[schemas.ScheduledTask])
+def get_machine_scheduled_tasks(machine_id: int, db: Session = Depends(get_db), _: str = Depends(verify_admin)):
+    machine = db.query(models.Machine).filter(models.Machine.id == machine_id).first()
+    if not machine:
+        raise HTTPException(status_code=404, detail="Machine not found")
+
+    return db.query(models.ScheduledTask).filter(models.ScheduledTask.machine_id == machine_id).all()
+
 @router.get("/machines/{machine_id}/logs/agent", response_model=List[schemas.AgentLog])
 def get_machine_agent_logs(machine_id: int, db: Session = Depends(get_db), _: str = Depends(verify_admin)):
     machine = db.query(models.Machine).filter(models.Machine.id == machine_id).first()

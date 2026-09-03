@@ -21,9 +21,12 @@ class Machine(Base):
     is_online = Column(Boolean, default=True)
     kopia_config = Column(Text, nullable=True) # JSON string of kopia policies
     agent_version = Column(String, nullable=True)
+    boot_time = Column(Integer, nullable=True) # Unix timestamp of boot time
+    reboot_pending = Column(Boolean, default=False)
 
     updates = relationship("PendingUpdate", back_populates="machine", cascade="all, delete-orphan")
     tasks = relationship("AgentTask", back_populates="machine", cascade="all, delete-orphan")
+    scheduled_tasks = relationship("ScheduledTask", back_populates="machine", cascade="all, delete-orphan")
 
 class PendingUpdate(Base):
     __tablename__ = "pending_updates"
@@ -53,6 +56,18 @@ class AgentTask(Base):
     action_id = Column(String, nullable=True) # UUID correlating user action
 
     machine = relationship("Machine", back_populates="tasks")
+
+
+class ScheduledTask(Base):
+    __tablename__ = "scheduled_tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    machine_id = Column(Integer, ForeignKey("machines.id"))
+    task_name = Column(String, nullable=False)
+    schedule = Column(String, nullable=False)
+    command = Column(String, nullable=False)
+
+    machine = relationship("Machine", back_populates="scheduled_tasks")
 
 class GlobalSettings(Base):
     __tablename__ = "global_settings"

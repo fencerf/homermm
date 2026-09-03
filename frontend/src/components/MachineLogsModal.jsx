@@ -16,6 +16,27 @@ const MachineLogsModal = ({ machineId, onClose }) => {
     const [searchQuery, setSearchQuery] = useState("");
     const [timeRange, setTimeRange] = useState("ALL"); // ALL, 1H, 24H, 7D
     const [expandedActions, setExpandedActions] = useState({});
+    const [isFlushing, setIsFlushing] = useState(false);
+
+    const handleFlushLogs = async () => {
+        setIsFlushing(true);
+        try {
+            await axios.post(`/api/frontend/machines/${machineId}/tasks`, {
+                task_type: "flush_logs",
+                payload: "{}",
+                action_id: null
+            });
+            // Wait a moment for the agent to process and flush
+            setTimeout(() => {
+                fetchLogs();
+                setIsFlushing(false);
+            }, 3000);
+        } catch (err) {
+            console.error("Failed to request log flush:", err);
+            setError("Failed to request log flush from agent.");
+            setIsFlushing(false);
+        }
+    };
 
     const fetchLogs = async () => {
         setLoading(true);
@@ -116,6 +137,20 @@ const MachineLogsModal = ({ machineId, onClose }) => {
                     </div>
 
                     <div className="flex items-center space-x-4">
+                        {activeTab === 'agent' && (
+                            <button
+                                onClick={handleFlushLogs}
+                                disabled={isFlushing}
+                                className="px-3 py-1 text-sm bg-blue-50 text-blue-700 border border-blue-200 rounded hover:bg-blue-100 disabled:opacity-50 flex items-center"
+                            >
+                                {isFlushing ? (
+                                    <RefreshCw size={14} className="mr-1 animate-spin" />
+                                ) : (
+                                    <Activity size={14} className="mr-1" />
+                                )}
+                                Request Agent Flush
+                            </button>
+                        )}
                         {(activeTab === 'agent' || activeTab === 'audit') && (
                             <div className="flex items-center space-x-2">
                                 <select

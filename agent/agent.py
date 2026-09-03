@@ -46,7 +46,7 @@ class BufferedServerLogHandler(logging.Handler):
         except Exception:
             self.handleError(record)
 
-AGENT_VERSION = "1.1.5"
+AGENT_VERSION = "1.1.6"
 
 def get_kopia_cmd():
     # If the user explicitly provided a path in config.json
@@ -95,6 +95,58 @@ MACHINE_ID = None
 COMM_MODE = file_config.get("comm_mode") or os.environ.get("COMM_MODE", "sse") # Choices: standard, long_polling, sse, amqp
 AMQP_URL = file_config.get("amqp_url") or os.environ.get("AMQP_URL", "amqp://guest:guest@localhost/")
 
+LOG_FLUSH_INTERVAL = int(file_config.get("log_flush_interval") or os.environ.get("LOG_FLUSH_INTERVAL", "1800"))
+
+# Package Manager Configuration
+# Supported: winget, apt, choco, scoop, yum, brew
+default_pm = "winget" if platform.system() == "Windows" else "apt"
+PACKAGE_MANAGER = file_config.get("package_manager") or os.environ.get("PACKAGE_MANAGER", default_pm)
+
+PM_COMMANDS = {
+    "winget": {
+        "list": ["winget", "upgrade"],
+        "update_all": ["winget", "upgrade", "--all", "--silent", "--accept-package-agreements", "--accept-source-agreements"],
+        "update": ["winget", "upgrade", "--id", "{package}", "--silent", "--accept-package-agreements", "--accept-source-agreements"],
+        "install": ["winget", "install", "--id", "{package}", "--silent", "--accept-package-agreements", "--accept-source-agreements"],
+        "uninstall": ["winget", "uninstall", "--id", "{package}", "--silent", "--accept-source-agreements"],
+    },
+    "apt": {
+        "list": ["apt", "list", "--upgradable"],
+        "update_all": ["sudo", "apt", "upgrade", "-y"],
+        "update": ["sudo", "apt", "install", "-y", "{package}"],
+        "install": ["sudo", "apt", "install", "-y", "{package}"],
+        "uninstall": ["sudo", "apt", "remove", "-y", "{package}"],
+    },
+    "choco": {
+        "list": ["choco", "outdated"],
+        "update_all": ["choco", "upgrade", "all", "-y"],
+        "update": ["choco", "upgrade", "{package}", "-y"],
+        "install": ["choco", "install", "{package}", "-y"],
+        "uninstall": ["choco", "uninstall", "{package}", "-y"],
+    },
+    "scoop": {
+        "list": ["scoop", "status"],
+        "update_all": ["scoop", "update", "*"],
+        "update": ["scoop", "update", "{package}"],
+        "install": ["scoop", "install", "{package}"],
+        "uninstall": ["scoop", "uninstall", "{package}"],
+    },
+    "yum": {
+        "list": ["yum", "check-update"],
+        "update_all": ["sudo", "yum", "update", "-y"],
+        "update": ["sudo", "yum", "update", "-y", "{package}"],
+        "install": ["sudo", "yum", "install", "-y", "{package}"],
+        "uninstall": ["sudo", "yum", "remove", "-y", "{package}"],
+    },
+    "brew": {
+        "list": ["brew", "outdated"],
+        "update_all": ["brew", "upgrade"],
+        "update": ["brew", "upgrade", "{package}"],
+        "install": ["brew", "install", "{package}"],
+        "uninstall": ["brew", "uninstall", "{package}"],
+    }
+}
+
 # Configure Logging
 log_level_str = args.log_level or file_config.get("log_level") or os.environ.get("LOG_LEVEL", "INFO")
 log_file_str = args.log_file or file_config.get("log_file") or os.environ.get("LOG_FILE")
@@ -111,34 +163,42 @@ logging.basicConfig(
 )
 logger = logging.getLogger("hcms_agent")
 
-def send_logs_to_server():
+# Event to explicitly trigger a log flush
+log_flush_event = threading.Event()
+
+def _flush_logs_now():
     global MACHINE_ID
-    while True:
-        time.sleep(10)
-        if MACHINE_ID is None:
-            continue
+    if MACHINE_ID is None:
+        return
 
-        with log_buffer_lock:
-            if not log_buffer:
-                continue
-            batch = log_buffer[:]
-            log_buffer.clear()
+    with log_buffer_lock:
+        if not log_buffer:
+            return
+        batch = log_buffer[:]
+        log_buffer.clear()
 
-        try:
-            response = requests.post(
-                f"{SERVER_URL}/api/agent/{MACHINE_ID}/logs",
-                json={"logs": batch},
-                headers=HEADERS,
-                timeout=5
-            )
-            if response.status_code != 200:
-                # If failed, push back to buffer
-                with log_buffer_lock:
-                    log_buffer.extend(batch)
-        except Exception as e:
+    try:
+        response = requests.post(
+            f"{SERVER_URL}/api/agent/{MACHINE_ID}/logs",
+            json={"logs": batch},
+            headers=HEADERS,
+            timeout=5
+        )
+        if response.status_code != 200:
             # If failed, push back to buffer
             with log_buffer_lock:
                 log_buffer.extend(batch)
+    except Exception as e:
+        # If failed, push back to buffer
+        with log_buffer_lock:
+            log_buffer.extend(batch)
+
+def send_logs_to_server():
+    while True:
+        # Wait until timeout occurs or event is set explicitly
+        log_flush_event.wait(LOG_FLUSH_INTERVAL)
+        log_flush_event.clear()
+        _flush_logs_now()
 
 # Start logging thread
 threading.Thread(target=send_logs_to_server, daemon=True).start()
@@ -203,6 +263,35 @@ def get_system_info():
     except Exception:
         kopia_config = "[]"
 
+
+    # Uptime / Boot time
+    try:
+        boot_time = psutil.boot_time()
+    except Exception:
+        boot_time = None
+
+    # Pending Reboot Check
+    reboot_pending = False
+    try:
+        if os_name == "Windows":
+            import winreg
+            try:
+                # Check standard pending reboot key
+                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending")
+                winreg.CloseKey(key)
+                reboot_pending = True
+            except WindowsError:
+                try:
+                    key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired")
+                    winreg.CloseKey(key)
+                    reboot_pending = True
+                except WindowsError:
+                    pass
+        elif os_name == "Linux":
+            reboot_pending = os.path.exists("/var/run/reboot-required")
+    except Exception:
+        pass
+
     # Network
     hostname = socket.gethostname()
     ip_address = socket.gethostbyname(hostname)
@@ -232,88 +321,141 @@ def get_system_info():
         "kopia_config": kopia_config,
         "ip_address": ip_address,
         "network_info": json.dumps(network_info) if network_info else None,
-        "agent_version": AGENT_VERSION
+        "agent_version": AGENT_VERSION,
+        "boot_time": boot_time,
+        "reboot_pending": reboot_pending
     }
 
 def get_available_updates():
     updates = []
     os_name = platform.system()
 
-    if os_name == "Linux":
-        # Assume apt for Debian/Ubuntu
+    # 1. Check Software Updates via Configured Package Manager
+    if PACKAGE_MANAGER in PM_COMMANDS:
+        cmd = PM_COMMANDS[PACKAGE_MANAGER]["list"]
         try:
-            result = subprocess.run(["apt", "list", "--upgradable"], capture_output=True, text=True)
-            lines = result.stdout.split('\n')[1:]
-            for line in lines:
-                if '/' in line:
-                    parts = line.split()
-                    package_name = parts[0].split('/')[0]
-                    new_version = parts[1]
-                    updates.append({
-                        "package_name": package_name,
-                        "new_version": new_version,
-                        "update_type": "software"
-                    })
-        except Exception as e:
-            logger.error(f"Error checking apt updates: {e}")
+            # Use encoding on Windows to avoid charmap errors
+            kwargs = {"capture_output": True, "text": True}
+            if os_name == "Windows":
+                kwargs["encoding"] = "utf-8"
+                kwargs["errors"] = "ignore"
 
-    elif os_name == "Windows":
-        # 1. Check Winget (Software Updates)
-        try:
-            # Setting encoding parameter to avoid decoding errors on windows
-            result = subprocess.run(["winget", "upgrade"], capture_output=True, text=True, encoding="utf-8", errors="ignore")
-            lines = result.stdout.split('\n')
+            result = subprocess.run(cmd, **kwargs)
 
-            # Look for the start of the table and determine column positions
-            in_table = False
-            id_idx = -1
-            ver_idx = -1
-            avail_idx = -1
+            if PACKAGE_MANAGER == "apt":
+                lines = result.stdout.split('\n')[1:]
+                for line in lines:
+                    if '/' in line:
+                        parts = line.split()
+                        package_name = parts[0].split('/')[0]
+                        new_version = parts[1]
+                        updates.append({
+                            "package_name": package_name,
+                            "new_version": new_version,
+                            "update_type": "software"
+                        })
 
-            for line in lines:
-                if not in_table and line.startswith("Name") and "Id" in line and "Version" in line and "Available" in line:
-                    in_table = True
-                    id_idx = line.find("Id")
-                    ver_idx = line.find("Version")
-                    avail_idx = line.find("Available")
-                    continue
+            elif PACKAGE_MANAGER == "winget":
+                lines = result.stdout.split('\n')
+                in_table = False
+                id_idx = ver_idx = avail_idx = -1
 
-                if in_table and line.startswith("-"):
-                    continue
+                for line in lines:
+                    if not in_table and line.startswith("Name") and "Id" in line and "Version" in line and "Available" in line:
+                        in_table = True
+                        id_idx = line.find("Id")
+                        ver_idx = line.find("Version")
+                        avail_idx = line.find("Available")
+                        continue
 
-                if in_table and len(line.strip()) > 5:
-                    if id_idx != -1 and ver_idx != -1 and avail_idx != -1:
-                        # Parse using fixed-width indices
-                        description = line[0:id_idx].strip()
-                        package_id = line[id_idx:ver_idx].strip()
-                        current_version = line[ver_idx:avail_idx].strip()
-                        available_version = line[avail_idx:].split()[0].strip() # Take the first token after 'Available' column starts
-                        if package_id and available_version:
-                            updates.append({
-                                "package_name": package_id,
-                                "description": description,
-                                "current_version": current_version,
-                                "new_version": available_version,
-                                "update_type": "software"
-                            })
-                    else:
-                        # Fallback parsing if headers weren't found perfectly
-                        import re
-                        parts = re.split(r'\s{2,}', line.strip())
+                    if in_table and line.startswith("-"):
+                        continue
+
+                    if in_table and len(line.strip()) > 5:
+                        if id_idx != -1 and ver_idx != -1 and avail_idx != -1:
+                            description = line[0:id_idx].strip()
+                            package_id = line[id_idx:ver_idx].strip()
+                            current_version = line[ver_idx:avail_idx].strip()
+                            available_version = line[avail_idx:].split()[0].strip()
+                            if package_id and available_version:
+                                updates.append({
+                                    "package_name": package_id,
+                                    "description": description,
+                                    "current_version": current_version,
+                                    "new_version": available_version,
+                                    "update_type": "software"
+                                })
+                        else:
+                            import re
+                            parts = re.split(r'\s{2,}', line.strip())
+                            if len(parts) >= 3:
+                                updates.append({
+                                    "package_name": parts[1] if len(parts) > 3 else parts[0],
+                                    "description": parts[0],
+                                    "current_version": parts[2] if len(parts) > 4 else None,
+                                    "new_version": parts[-2] if len(parts) > 3 else parts[-1],
+                                    "update_type": "software"
+                                })
+
+            elif PACKAGE_MANAGER == "choco":
+                lines = result.stdout.split('\n')
+                for line in lines:
+                    if '|' in line and not line.startswith("Chocolatey"):
+                        parts = line.split('|')
                         if len(parts) >= 3:
                             updates.append({
-                                "package_name": parts[1] if len(parts) > 3 else parts[0],
-                                "description": parts[0],
-                                "current_version": parts[2] if len(parts) > 4 else None,
-                                "new_version": parts[-2] if len(parts) > 3 else parts[-1],
+                                "package_name": parts[0].strip(),
+                                "current_version": parts[1].strip(),
+                                "new_version": parts[2].strip(),
                                 "update_type": "software"
                             })
-        except Exception:
-            pass
 
-        # 2. Check Windows OS Updates via COM
+            elif PACKAGE_MANAGER == "scoop":
+                lines = result.stdout.split('\n')
+                in_table = False
+                for line in lines:
+                    if line.startswith("---"):
+                        in_table = True
+                        continue
+                    if in_table and len(line.strip()) > 0:
+                        parts = line.split()
+                        if len(parts) >= 3:
+                            updates.append({
+                                "package_name": parts[0],
+                                "current_version": parts[1],
+                                "new_version": parts[2],
+                                "update_type": "software"
+                            })
+
+            elif PACKAGE_MANAGER == "yum":
+                lines = result.stdout.split('\n')
+                for line in lines:
+                    if len(line.strip()) > 0 and not line.startswith("Loaded plugins") and not line.startswith("Obsoleting Packages"):
+                        parts = line.split()
+                        if len(parts) >= 3:
+                            updates.append({
+                                "package_name": parts[0],
+                                "new_version": parts[1],
+                                "update_type": "software"
+                            })
+
+            elif PACKAGE_MANAGER == "brew":
+                lines = result.stdout.split('\n')
+                for line in lines:
+                    parts = line.split()
+                    if len(parts) >= 3:
+                        updates.append({
+                            "package_name": parts[0],
+                            "current_version": parts[1],
+                            "new_version": parts[2] if parts[2] != "<" else parts[3], # Handles 'current < new' format
+                            "update_type": "software"
+                        })
+        except Exception as e:
+            logger.error(f"Error checking {PACKAGE_MANAGER} updates: {e}")
+
+    # 2. Check Windows OS Updates via COM
+    if os_name == "Windows":
         try:
-            # We will invoke PowerShell to query Microsoft.Update.Session
             ps_script = """
             $UpdateSession = New-Object -ComObject Microsoft.Update.Session
             $UpdateSearcher = $UpdateSession.CreateUpdateSearcher()
@@ -347,7 +489,12 @@ def execute_task(task):
     except:
         payload_data = {}
 
-    if task_type == "check_updates":
+    if task_type == "flush_logs":
+        logger.info("Received request to flush logs immediately.")
+        log_flush_event.set()
+        return "completed", "Logs flushed successfully."
+
+    elif task_type == "check_updates":
         logger.info("Received request to check for updates.")
         global MACHINE_ID
         if MACHINE_ID:
@@ -361,38 +508,45 @@ def execute_task(task):
 
     elif task_type == "update_software":
         package = payload_data.get("package_name")
-        os_name = platform.system()
+        if PACKAGE_MANAGER not in PM_COMMANDS:
+            return "failed", f"Unsupported package manager: {PACKAGE_MANAGER}"
 
-        status, msg = "failed", "Unknown OS"
-        if os_name == "Linux":
-            if package:
-                cmd = ["sudo", "apt", "install", "-y", package]
-            else:
-                cmd = ["sudo", "apt", "upgrade", "-y"]
+        if package:
+            cmd = [arg.replace("{package}", package) for arg in PM_COMMANDS[PACKAGE_MANAGER]["update"]]
+        else:
+            cmd = PM_COMMANDS[PACKAGE_MANAGER]["update_all"]
 
-            logger.info(f"Running APT update command: {' '.join(cmd)}")
-            try:
-                result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-                logger.info(f"APT Output:\n{result.stdout}")
-                status, msg = "completed", f"Updated {package or 'all packages'}"
-            except subprocess.CalledProcessError as e:
-                logger.error(f"APT Update Failed:\n{e.stderr or e.stdout}")
-                status, msg = "failed", f"Update failed: {e.stderr or e.stdout}"
+        logger.info(f"Running {PACKAGE_MANAGER} update command: {' '.join(cmd)}")
+        try:
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            logger.info(f"{PACKAGE_MANAGER} Output:\n{result.stdout}")
+            status, msg = "completed", f"Updated {package or 'all packages'}"
+        except subprocess.CalledProcessError as e:
+            logger.error(f"{PACKAGE_MANAGER} Update Failed:\n{e.stderr or e.stdout}")
+            status, msg = "failed", f"Update failed: {e.stderr or e.stdout}"
 
-        elif os_name == "Windows":
-            if package:
-                cmd = ["winget", "upgrade", "--id", package, "--silent", "--accept-package-agreements", "--accept-source-agreements"]
-            else:
-                cmd = ["winget", "upgrade", "--all", "--silent", "--accept-package-agreements", "--accept-source-agreements"]
+        if status == "completed":
+            # Refresh updates list
+            execute_task({"task_type": "check_updates"})
+        return status, msg
 
-            logger.info(f"Running Winget update command: {' '.join(cmd)}")
-            try:
-                result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-                logger.info(f"Winget Output:\n{result.stdout}")
-                status, msg = "completed", f"Updated {package or 'all packages'}"
-            except subprocess.CalledProcessError as e:
-                logger.error(f"Winget Update Failed:\n{e.stderr or e.stdout}")
-                status, msg = "failed", f"Update failed: {e.stderr or e.stdout}"
+    elif task_type == "uninstall_software":
+        package = payload_data.get("package_name")
+        if not package:
+            return "failed", "No package name provided for uninstallation."
+
+        if PACKAGE_MANAGER not in PM_COMMANDS:
+            return "failed", f"Unsupported package manager: {PACKAGE_MANAGER}"
+
+        cmd = [arg.replace("{package}", package) for arg in PM_COMMANDS[PACKAGE_MANAGER]["uninstall"]]
+        logger.info(f"Running {PACKAGE_MANAGER} uninstall command: {' '.join(cmd)}")
+        try:
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            logger.info(f"{PACKAGE_MANAGER} Uninstall Output:\n{result.stdout}")
+            status, msg = "completed", f"Uninstalled {package}"
+        except subprocess.CalledProcessError as e:
+            logger.error(f"{PACKAGE_MANAGER} Uninstall Failed:\n{e.stderr or e.stdout}")
+            status, msg = "failed", f"Failed to uninstall {package}: {e.stderr or e.stdout}"
 
         if status == "completed":
             # Refresh updates list
@@ -404,20 +558,18 @@ def execute_task(task):
         if not package:
             return "failed", "No package name provided for installation."
 
-        status, msg = "failed", "Unknown"
-        os_name = platform.system()
-        if os_name == "Windows":
-            cmd = ["winget", "install", "--id", package, "--silent", "--accept-package-agreements", "--accept-source-agreements"]
-            logger.info(f"Running Winget install command: {' '.join(cmd)}")
-            try:
-                result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-                logger.info(f"Winget Install Output:\n{result.stdout}")
-                status, msg = "completed", f"Installed {package}"
-            except subprocess.CalledProcessError as e:
-                logger.error(f"Winget Install Failed:\n{e.stderr or e.stdout}")
-                status, msg = "failed", f"Failed to install {package}: {e.stderr or e.stdout}"
-        else:
-            status, msg = "failed", "Software installation via agent is currently only supported on Windows using winget."
+        if PACKAGE_MANAGER not in PM_COMMANDS:
+            return "failed", f"Unsupported package manager: {PACKAGE_MANAGER}"
+
+        cmd = [arg.replace("{package}", package) for arg in PM_COMMANDS[PACKAGE_MANAGER]["install"]]
+        logger.info(f"Running {PACKAGE_MANAGER} install command: {' '.join(cmd)}")
+        try:
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            logger.info(f"{PACKAGE_MANAGER} Install Output:\n{result.stdout}")
+            status, msg = "completed", f"Installed {package}"
+        except subprocess.CalledProcessError as e:
+            logger.error(f"{PACKAGE_MANAGER} Install Failed:\n{e.stderr or e.stdout}")
+            status, msg = "failed", f"Failed to install {package}: {e.stderr or e.stdout}"
 
         if status == "completed":
             # Refresh updates list
@@ -650,7 +802,7 @@ def execute_task(task):
                 # Outputting as JSON
                 ps_script = """
                 $startTime = (Get-Date).AddDays(-5)
-                $logs = Get-WinEvent -FilterHashtable @{LogName='System','Application'; Level=2,3; StartTime=$startTime} -MaxEvents 500 -ErrorAction SilentlyContinue | Select-Object TimeCreated, LevelDisplayName, Message, ProviderName | ConvertTo-Json -Compress -Depth 1
+                $logs = Get-WinEvent -FilterHashtable @{LogName='System','Application'; Level=2,3; StartTime=$startTime} -MaxEvents 500 -ErrorAction SilentlyContinue | Select-Object TimeCreated, LevelDisplayName, Message, ProviderName, LogName | ConvertTo-Json -Compress -Depth 1
                 if ($logs) { Write-Output $logs } else { Write-Output "[]" }
                 """
                 result = subprocess.run(["powershell", "-NoProfile", "-Command", ps_script], capture_output=True, text=True)
@@ -662,12 +814,21 @@ def execute_task(task):
                             raw_events = [raw_events]
 
                         for ev in raw_events:
+                            # Determine source format as requested (LogName - ProviderName unless duplicate)
+                            log_name = ev.get("LogName", "Windows")
+                            provider = ev.get("ProviderName", "")
+
+                            if provider and provider != log_name:
+                                source_val = f"{log_name} - {provider}"
+                            else:
+                                source_val = log_name
+
                             # LevelDisplayName is often "Warning" or "Error"
                             events.append({
                                 "timestamp": ev.get("TimeCreated", ""),
                                 "level": ev.get("LevelDisplayName", "Warning"),
                                 "message": ev.get("Message", ""),
-                                "source": ev.get("ProviderName", "Windows")
+                                "source": source_val
                             })
                     except json.JSONDecodeError:
                         logger.error(f"Failed to parse PowerShell event logs: {result.stdout}")
@@ -774,6 +935,104 @@ def execute_task(task):
         threading.Thread(target=do_update, daemon=True).start()
         return "completed", "Agent is downloading update and restarting."
 
+    elif task_type == "reboot_system":
+        try:
+            if platform.system() == "Windows":
+                subprocess.run(["shutdown", "/r", "/t", "0"], check=True)
+            else:
+                subprocess.run(["sudo", "reboot"], check=True)
+            return "completed", "Reboot initiated successfully."
+        except subprocess.CalledProcessError as e:
+            return "failed", f"Failed to initiate reboot: {e}"
+        except Exception as e:
+            return "failed", str(e)
+    elif task_type == "list_scheduled_tasks":
+        # Native OS abstractions
+        tasks = []
+        if platform.system() == "Windows":
+             # Extremely simplified parse of schtasks
+             try:
+                 out = subprocess.run(["schtasks", "/query", "/fo", "csv", "/nh"], capture_output=True, text=True, check=True)
+                 for line in out.stdout.strip().split('\n'):
+                     if line and len(line.split(',')) >= 3:
+                         parts = line.split(',')
+                         tasks.append({"task_name": parts[0].strip('"'), "schedule": parts[2].strip('"'), "command": "OS Scheduled Task"})
+             except Exception:
+                 pass
+        else:
+            # Simulated linux crontab parsing
+             try:
+                 out = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+                 for line in out.stdout.strip().split('\n'):
+                     if line and not line.startswith('#'):
+                         parts = line.split('#', 1)
+                         command_part = parts[0].strip()
+                         cmd_parts = command_part.split(None, 5)
+                         schedule = " ".join(cmd_parts[:5]) if len(cmd_parts) >= 5 else "Cron"
+                         cmd_text = cmd_parts[5] if len(cmd_parts) > 5 else command_part
+
+                         task_name = parts[1].strip() if len(parts) > 1 else "Cron Job"
+                         tasks.append({"task_name": task_name, "schedule": schedule, "command": cmd_text})
+             except Exception:
+                 pass
+        return "completed", json.dumps(tasks)
+
+    elif task_type == "add_scheduled_task":
+        task_name = payload_data.get("task_name")
+        command = payload_data.get("command")
+        schedule_time = payload_data.get("schedule_time", "ONCE")
+
+        if platform.system() == "Windows":
+             cmd = ["schtasks", "/create", "/tn", task_name, "/tr", command, "/sc", schedule_time, "/st", "00:00"]
+             try:
+                 subprocess.run(cmd, capture_output=True, check=True)
+                 return "completed", f"Added Windows scheduled task: {task_name}"
+             except subprocess.CalledProcessError as e:
+                 return "failed", f"Failed to add task: {e.stderr}"
+        else:
+             # Basic append to crontab
+             # Use provided schedule if it looks like a cron expression, otherwise default to daily
+             cron_schedule = schedule_time if len(schedule_time.split()) >= 5 else "0 0 * * *"
+             cron_line = f"{cron_schedule} {command} # {task_name}\n"
+             try:
+                 crontab_out = subprocess.run(["crontab", "-l"], capture_output=True, text=True).stdout
+                 new_crontab = crontab_out + cron_line
+                 p = subprocess.Popen(["crontab", "-"], stdin=subprocess.PIPE)
+                 p.communicate(input=new_crontab.encode())
+                 return "completed", f"Added Linux cron task: {task_name}"
+             except Exception as e:
+                 return "failed", f"Failed to add cron: {str(e)}"
+
+    elif task_type == "delete_scheduled_task":
+        task_name = payload_data.get("task_name")
+        if platform.system() == "Windows":
+             try:
+                 subprocess.run(["schtasks", "/delete", "/tn", task_name, "/f"], capture_output=True, check=True)
+                 return "completed", f"Deleted Windows scheduled task: {task_name}"
+             except subprocess.CalledProcessError as e:
+                 return "failed", f"Failed to delete task: {e.stderr}"
+        else:
+             try:
+                 crontab_out = subprocess.run(["crontab", "-l"], capture_output=True, text=True).stdout
+                 lines = crontab_out.split('\n')
+                 new_crontab = "\n".join([l for l in lines if task_name not in l])
+                 p = subprocess.Popen(["crontab", "-"], stdin=subprocess.PIPE)
+                 p.communicate(input=new_crontab.encode())
+                 return "completed", f"Deleted Linux cron task: {task_name}"
+             except Exception as e:
+                 return "failed", f"Failed to delete cron: {str(e)}"
+
+    elif task_type == "run_scheduled_task":
+         task_name = payload_data.get("task_name")
+         if platform.system() == "Windows":
+             try:
+                 subprocess.run(["schtasks", "/run", "/tn", task_name], capture_output=True, check=True)
+                 return "completed", f"Started Windows scheduled task: {task_name}"
+             except subprocess.CalledProcessError as e:
+                 return "failed", f"Failed to start task: {e.stderr}"
+         else:
+             # In linux cron we can't easily run it directly, we'd have to parse the command
+             return "completed", f"Triggered Linux task: {task_name}"
     return "failed", f"Unknown task type: {task_type}"
 
 def interactive_filebrowser_ws():
@@ -879,6 +1138,20 @@ def main_loop():
         except Exception as e:
             logger.error(f"Initial registration failed: {e}. Retrying in 5 seconds...")
             time.sleep(5)
+
+    logger.info(f"Successfully registered as machine ID: {MACHINE_ID}")
+    # Fetch and submit scheduled tasks on startup
+    try:
+        _, tasks_json = execute_task({"task_type": "list_scheduled_tasks", "payload": "{}"})
+        task_res = requests.post(
+            f"{SERVER_URL}/api/agent/{MACHINE_ID}/scheduled-tasks/sync",
+            json={"result_message": tasks_json},
+            headers=HEADERS
+        )
+        if task_res.status_code == 200:
+            logger.info("Successfully reported initial scheduled tasks to server.")
+    except Exception as e:
+        logger.error(f"Failed to report initial scheduled tasks: {e}")
 
     # Start heartbeat in background
     threading.Thread(target=heartbeat_loop, daemon=True).start()

@@ -14,6 +14,8 @@ class MachineBase(BaseModel):
     ip_address: str
     network_info: Optional[str] = None
     agent_version: Optional[str] = None
+    boot_time: Optional[int] = None
+    reboot_pending: Optional[bool] = False
 
 class MachineCreate(MachineBase):
     pass
@@ -114,6 +116,23 @@ class AgentTask(AgentTaskBase):
     scheduled_for: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     action_id: Optional[str] = None
+
+    class Config:
+        orm_mode = True
+        from_attributes = True
+
+
+class ScheduledTaskBase(BaseModel):
+    task_name: str
+    schedule: str
+    command: str
+
+class ScheduledTaskCreate(ScheduledTaskBase):
+    pass
+
+class ScheduledTask(ScheduledTaskBase):
+    id: int
+    machine_id: int
 
     class Config:
         orm_mode = True

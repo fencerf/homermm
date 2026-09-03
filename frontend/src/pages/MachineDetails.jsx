@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Cpu, HardDrive, Database, RefreshCw, Archive, FolderSearch, Terminal } from 'lucide-react';
+import { ArrowLeft, Cpu, HardDrive, Database, RefreshCw, Archive, FolderSearch, Terminal, List, Clock, ChevronDown, ChevronRight, Folder } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import RemoteFileBrowser from '../components/RemoteFileBrowser';
 import MachineLogsModal from '../components/MachineLogsModal';
@@ -11,14 +11,103 @@ import TextEditorModal from '../components/TextEditorModal';
 import { formatTime, fetchServerTimezone } from '../utils/timezone';
 import { generateUUID } from '../utils/uuid';
 
+
+const TaskFolder = ({ node, onRun, onDelete, disabled, level = 0 }) => {
+    // Only open the root node by default
+    const [isOpen, setIsOpen] = useState(level === 0);
+
+    // Calculate total tasks in this subtree for the badge
+    const countTasks = (n) => {
+        let count = n.tasks ? n.tasks.length : 0;
+        if (n.children) {
+            Object.values(n.children).forEach(child => count += countTasks(child));
+        }
+        return count;
+    };
+    const totalTasks = countTasks(node);
+
+    return (
+        <div className={`border-l border-gray-200 ${level === 0 ? 'border border-gray-200 mb-2 rounded overflow-hidden' : 'pl-4'}`}>
+            <div
+                className={`px-4 py-2 flex items-center cursor-pointer hover:bg-gray-100 transition-colors ${level === 0 ? 'bg-gray-100 py-3' : 'bg-white'}`}
+                onClick={() => setIsOpen(!isOpen)}
+            >
+                {isOpen ? <ChevronDown size={18} className="mr-2 text-gray-600" /> : <ChevronRight size={18} className="mr-2 text-gray-600" />}
+                <Folder size={18} className="mr-2 text-blue-500" />
+                <span className={`font-semibold text-gray-800 ${level === 0 ? 'text-sm' : 'text-xs'}`}>{node.name}</span>
+                {totalTasks > 0 && (
+                    <span className="ml-auto text-xs font-medium text-gray-500 bg-gray-200 px-2 py-0.5 rounded-full">{totalTasks} tasks</span>
+                )}
+            </div>
+            {isOpen && (
+                <div className="bg-white">
+                    {/* Render child folders recursively */}
+                    {node.children && Object.keys(node.children).sort().map(childName => (
+                        <TaskFolder
+                            key={childName}
+                            node={node.children[childName]}
+                            onRun={onRun}
+                            onDelete={onDelete}
+                            disabled={disabled}
+                            level={level + 1}
+                        />
+                    ))}
+
+                    {/* Render tasks in this specific folder */}
+                    {node.tasks && node.tasks.length > 0 && (
+                        <div className="overflow-x-auto pl-8 pr-4 py-2">
+                            <table className="min-w-full text-left text-xs whitespace-nowrap">
+                                <thead className="uppercase tracking-wider border-b border-gray-200 text-gray-500">
+                                    <tr>
+                                        <th className="px-2 py-1 font-medium w-1/3">Task Name</th>
+                                        <th className="px-2 py-1 font-medium w-1/4">Schedule</th>
+                                        <th className="px-2 py-1 font-medium w-1/4">Command</th>
+                                        <th className="px-2 py-1 font-medium w-1/6">Controls</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {node.tasks.map((task, idx) => (
+                                        <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
+                                            <td className="px-2 py-1 font-medium text-gray-900">{task.shortName}</td>
+                                            <td className="px-2 py-1 text-gray-600">{task.schedule}</td>
+                                            <td className="px-2 py-1 text-gray-500 font-mono truncate max-w-[200px]" title={task.command}>{task.command}</td>
+                                            <td className="px-2 py-1 space-x-2">
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); onRun(task.task_name); }}
+                                                    disabled={disabled}
+                                                    className="text-blue-600 hover:text-blue-900 px-2 border border-blue-200 rounded hover:bg-blue-50 disabled:opacity-50"
+                                                >
+                                                    Run
+                                                </button>
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); onDelete(task.task_name); }}
+                                                    disabled={disabled}
+                                                    className="text-red-600 hover:text-red-900 px-2 border border-red-200 rounded hover:bg-red-50 disabled:opacity-50"
+                                                >
+                                                    Del
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+};
+
 function MachineDetails() {
+
     const { id } = useParams();
     const [machine, setMachine] = useState(null);
     const [updates, setUpdates] = useState([]);
     const [kopiaPaths, setKopiaPaths] = useState("");
     const [installPackageId, setInstallPackageId] = useState("");
     const [scheduleDate, setScheduleDate] = useState("");
-    const [actionMessage, setActionMessage] = useState("");
+    const [actionMessage, setActionMessage] = useState(null);
     const [isBrowserOpen, setIsBrowserOpen] = useState(false);
     const [isLogsOpen, setIsLogsOpen] = useState(false);
     const [isEventLogsOpen, setIsEventLogsOpen] = useState(false);
@@ -26,6 +115,11 @@ function MachineDetails() {
     const [editingFilePath, setEditingFilePath] = useState(null);
     const [latestAgentVersion, setLatestAgentVersion] = useState("");
     const [activeTasks, setActiveTasks] = useState([]);
+    const [activeTab, setActiveTab] = useState('overview'); // Add active tab state
+    const [scheduledTasks, setScheduledTasks] = useState([]);
+    const [newTaskName, setNewTaskName] = useState("");
+    const [newTaskCommand, setNewTaskCommand] = useState("");
+    const [newTaskSchedule, setNewTaskSchedule] = useState("");
 
     useEffect(() => {
         fetchServerTimezone();
@@ -88,8 +182,20 @@ function MachineDetails() {
             }
             if (completedAny) {
                  setActiveTasks(updatedTasks);
-                 setActionMessage(finalMessage);
-                 setTimeout(() => setActionMessage(""), 5000);
+                 // Don't show raw JSON dumps for list tasks as action messages
+                 if (finalMessage && !finalMessage.startsWith('[') && !finalMessage.includes('FlatLinuxTask')) {
+                     const isSuccess = finalMessage.startsWith('Task completed successfully');
+
+                     if (isSuccess && finalMessage.includes('[{')) {
+                        setActionMessage({ type: 'success', text: 'Tasks refreshed successfully.' });
+                     } else {
+                        setActionMessage({
+                            type: isSuccess ? 'success' : 'error',
+                            text: finalMessage
+                        });
+                     }
+                     setTimeout(() => setActionMessage(null), 5000);
+                 }
             }
         };
 
@@ -110,9 +216,9 @@ function MachineDetails() {
             const res = await axios.post(`/api/frontend/machines/${id}/tasks`, taskData);
             setActiveTasks(prev => [...prev, res.data.id]);
 
-            setActionMessage(`Task to update ${packageName || 'all packages'} submitted!${scheduleDate ? ' (Scheduled)' : ''}`);
+            setActionMessage({ type: 'success', text: `Task to update ${packageName || 'all packages'} submitted!${scheduleDate ? ' (Scheduled)' : ''}` });
             setScheduleDate("");
-            setTimeout(() => setActionMessage(""), 3000);
+            setTimeout(() => setActionMessage(null), 3000);
         } catch (error) {
             console.error("Error scheduling update", error);
         }
@@ -126,8 +232,8 @@ function MachineDetails() {
                 action_id: generateUUID()
             });
             setActiveTasks(prev => [...prev, res.data.id]);
-            setActionMessage("Task to check for updates submitted. Checking agent in background...");
-            setTimeout(() => setActionMessage(""), 5000);
+            setActionMessage({ type: 'success', text: 'Task to check for updates submitted. Checking agent in background...' });
+            setTimeout(() => setActionMessage(null), 5000);
         } catch (error) {
             console.error("Error scheduling update check", error);
         }
@@ -146,10 +252,10 @@ function MachineDetails() {
             }
             const res = await axios.post(`/api/frontend/machines/${id}/tasks`, taskData);
             setActiveTasks(prev => [...prev, res.data.id]);
-            setActionMessage(`Task to install ${installPackageId} submitted!${scheduleDate ? ' (Scheduled)' : ''}`);
+            setActionMessage({ type: 'success', text: `Task to install ${installPackageId} submitted!${scheduleDate ? ' (Scheduled)' : ''}` });
             setInstallPackageId("");
             setScheduleDate("");
-            setTimeout(() => setActionMessage(""), 3000);
+            setTimeout(() => setActionMessage(null), 3000);
 
             // Re-fetch updates list shortly after submitting task
             setTimeout(async () => {
@@ -164,7 +270,157 @@ function MachineDetails() {
         }
     };
 
-    const handleConfigureKopia = async (e) => {
+    const handleUninstallSoftware = async (packageName) => {
+        if (!window.confirm(`Are you sure you want to completely uninstall ${packageName}?`)) {
+            return;
+        }
+
+        try {
+            const taskData = {
+                task_type: "uninstall_software",
+                payload: JSON.stringify({ package_name: packageName }),
+                action_id: generateUUID()
+            };
+            if (scheduleDate) {
+                taskData.scheduled_for = new Date(scheduleDate).toISOString();
+            }
+            const res = await axios.post(`/api/frontend/machines/${id}/tasks`, taskData);
+            setActiveTasks(prev => [...prev, res.data.id]);
+            setActionMessage({ type: 'success', text: `Task to uninstall ${packageName} submitted!${scheduleDate ? ' (Scheduled)' : ''}` });
+            setScheduleDate("");
+            setTimeout(() => setActionMessage(null), 3000);
+
+            // Re-fetch updates list shortly after submitting task
+            setTimeout(async () => {
+                try {
+                    const updatesRes = await axios.get(`/api/frontend/machines/${id}/updates`);
+                    setUpdates(updatesRes.data);
+                } catch(e){}
+            }, 3000);
+        } catch (error) {
+            console.error("Error scheduling uninstallation", error);
+        }
+    };
+
+const fetchScheduledTasks = async () => {
+        try {
+            const token = localStorage.getItem('token');
+            const res = await axios.get(`/api/frontend/machines/${id}/scheduled-tasks`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            setScheduledTasks(res.data);
+        } catch (error) {
+            console.error("Error fetching cached scheduled tasks", error);
+        }
+    };
+
+    const handleRefreshScheduledTasks = async () => {
+        try {
+            const token = localStorage.getItem('token');
+            const res = await axios.post(`/api/frontend/machines/${id}/tasks`, {
+                task_type: "list_scheduled_tasks",
+                payload: JSON.stringify({}),
+                action_id: generateUUID()
+            }, { headers: { Authorization: `Bearer ${token}` } });
+
+            setActiveTasks(prev => [...prev, res.data.id]);
+            setActionMessage({ type: 'info', text: 'Fetching latest tasks from agent...' });
+
+            // Poll for completion to update cache
+            const pollTaskId = res.data.id;
+            let attempts = 0;
+            const interval = setInterval(async () => {
+                attempts++;
+                try {
+                    const taskRes = await axios.get(`/api/frontend/machines/${id}/tasks/${pollTaskId}`, {
+                        headers: { Authorization: `Bearer ${token}` }
+                    });
+                    if (taskRes.data.status === 'completed') {
+                        clearInterval(interval);
+                        // Fetch the newly updated cache
+                        fetchScheduledTasks();
+                    } else if (taskRes.data.status === 'failed' || attempts > 20) {
+                        clearInterval(interval);
+                    }
+                } catch(e) {}
+            }, 1000);
+
+        } catch (error) {
+            console.error("Error asking agent to refresh tasks", error);
+        }
+    };
+
+        const handleAddScheduledTask = async (e) => {
+        e.preventDefault();
+        try {
+            const token = localStorage.getItem('token');
+            const res = await axios.post(`/api/frontend/machines/${id}/tasks`, {
+                task_type: "add_scheduled_task",
+                payload: JSON.stringify({
+                    task_name: newTaskName,
+                    command: newTaskCommand,
+                    schedule_time: newTaskSchedule || (machine.os_name === "Windows" ? "ONCE" : "0 * * * *")
+                }),
+                action_id: generateUUID()
+            }, { headers: { Authorization: `Bearer ${token}` } });
+            setActiveTasks(prev => [...prev, res.data.id]);
+            setActionMessage({ type: 'success', text: `Task to add scheduled task '${newTaskName}' submitted!` });
+            setNewTaskName("");
+            setNewTaskCommand("");
+            setNewTaskSchedule("");
+            setTimeout(() => setActionMessage(null), 3000);
+
+            // Re-fetch after a delay
+            setTimeout(fetchScheduledTasks, 4000);
+        } catch (error) {
+            console.error("Error adding scheduled task", error);
+        }
+    };
+
+    const handleDeleteScheduledTask = async (taskName) => {
+        if (!window.confirm(`Are you sure you want to delete task '${taskName}'?`)) return;
+        try {
+            const token = localStorage.getItem('token');
+            const res = await axios.post(`/api/frontend/machines/${id}/tasks`, {
+                task_type: "delete_scheduled_task",
+                payload: JSON.stringify({ task_name: taskName }),
+                action_id: generateUUID()
+            }, { headers: { Authorization: `Bearer ${token}` } });
+            setActiveTasks(prev => [...prev, res.data.id]);
+            setActionMessage({ type: 'success', text: `Task to delete scheduled task '${taskName}' submitted!` });
+            setTimeout(() => setActionMessage(null), 3000);
+
+            // Re-fetch after a delay
+            setTimeout(fetchScheduledTasks, 4000);
+        } catch (error) {
+            console.error("Error deleting scheduled task", error);
+        }
+    };
+
+    const handleRunScheduledTask = async (taskName) => {
+        try {
+            const token = localStorage.getItem('token');
+            const res = await axios.post(`/api/frontend/machines/${id}/tasks`, {
+                task_type: "run_scheduled_task",
+                payload: JSON.stringify({ task_name: taskName }),
+                action_id: generateUUID()
+            }, { headers: { Authorization: `Bearer ${token}` } });
+            setActiveTasks(prev => [...prev, res.data.id]);
+            setActionMessage({ type: 'success', text: `Task to run scheduled task '${taskName}' submitted!` });
+            setTimeout(() => setActionMessage(null), 3000);
+        } catch (error) {
+            console.error("Error running scheduled task", error);
+        }
+    };
+
+    // Use effect to fetch scheduled tasks on tab change
+    useEffect(() => {
+        if (activeTab === 'scheduled_tasks') {
+            fetchScheduledTasks();
+        }
+    }, [activeTab]);
+
+        const handleConfigureKopia = async (e) => {
         e.preventDefault();
         try {
             const pathsArray = kopiaPaths.split(',').map(p => p.trim()).filter(p => p);
@@ -173,9 +429,9 @@ function MachineDetails() {
                 payload: JSON.stringify({ paths: pathsArray }),
                 action_id: generateUUID()
             });
-            setActionMessage("Kopia configuration task submitted!");
+            setActionMessage({ type: 'success', text: 'Kopia configuration task submitted!' });
             setKopiaPaths("");
-            setTimeout(() => setActionMessage(""), 3000);
+            setTimeout(() => setActionMessage(null), 3000);
         } catch (error) {
             console.error("Error scheduling Kopia config", error);
         }
@@ -197,6 +453,26 @@ function MachineDetails() {
         }
     }
 
+    let parsedNetwork = [];
+    if (machine && machine.network_info) {
+        try {
+            parsedNetwork = JSON.parse(machine.network_info);
+        } catch(e) {}
+    }
+
+    // Calculate uptime if boot_time is present
+    let uptimeDisplay = "Unknown";
+    let lastRebootDisplay = "Unknown";
+    if (machine && machine.boot_time) {
+        const bootDate = new Date(machine.boot_time * 1000);
+        lastRebootDisplay = bootDate.toLocaleString();
+
+        const diffMs = Date.now() - bootDate.getTime();
+        const diffDays = Math.floor(diffMs / 86400000);
+        const diffHrs = Math.floor((diffMs % 86400000) / 3600000);
+        uptimeDisplay = `${diffDays} days, ${diffHrs} hours`;
+    }
+
     if (!machine) return <div className="p-6">Loading...</div>;
 
     return (
@@ -206,12 +482,61 @@ function MachineDetails() {
             </Link>
 
             {actionMessage && (
-                <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded mb-4">
-                    {actionMessage}
+                <div className={`px-4 py-3 rounded mb-4 border flex justify-between items-start shadow-sm
+                    ${actionMessage.type === 'error' ? 'bg-red-50 border-red-200 text-red-700' :
+                      actionMessage.type === 'warning' ? 'bg-yellow-50 border-yellow-200 text-yellow-700' :
+                      actionMessage.type === 'info' ? 'bg-blue-50 border-blue-200 text-blue-700' :
+                      'bg-green-50 border-green-200 text-green-700'}`}>
+                    <div className="flex-1">
+                        <p className="line-clamp-2" title={actionMessage.text}>
+                            {actionMessage.text}
+                        </p>
+                        {actionMessage.text && actionMessage.text.length > 150 && (
+                            <p className="text-xs mt-1 opacity-75 italic">(Message truncated. Check logs for more details)</p>
+                        )}
+                    </div>
+                    <button onClick={() => setActionMessage(null)} className="ml-4 opacity-60 hover:opacity-100">
+                        &times;
+                    </button>
                 </div>
             )}
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Tab Navigation */}
+            <div className="flex space-x-1 border-b border-gray-200 mb-6 bg-white p-1 rounded-t-lg shadow-sm">
+                <button
+                    onClick={() => setActiveTab('overview')}
+                    className={`flex items-center px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                        activeTab === 'overview'
+                            ? 'bg-blue-100 text-blue-700'
+                            : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+                    }`}
+                >
+                    <List size={16} className="mr-2" /> Overview
+                </button>
+                <button
+                    onClick={() => setActiveTab('backups')}
+                    className={`flex items-center px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                        activeTab === 'backups'
+                            ? 'bg-blue-100 text-blue-700'
+                            : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+                    }`}
+                >
+                    <Archive size={16} className="mr-2" /> Backups
+                </button>
+                <button
+                    onClick={() => setActiveTab('scheduled_tasks')}
+                    className={`flex items-center px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                        activeTab === 'scheduled_tasks'
+                            ? 'bg-blue-100 text-blue-700'
+                            : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+                    }`}
+                >
+                    <Clock size={16} className="mr-2" /> Scheduled Tasks
+                </button>
+            </div>
+
+            {/* Tab Content */}
+            <div className={`${activeTab === 'overview' ? 'flex flex-col space-y-6' : 'hidden'}`}>
                 {/* Hardware Info Panel */}
                 <div className="bg-white p-6 rounded-lg shadow-md border border-gray-200">
                     <div className="flex justify-between items-center border-b pb-2 mb-4">
@@ -229,6 +554,26 @@ function MachineDetails() {
                             >
                                 Event Logs
                             </button>
+                            <button
+                                onClick={async () => {
+                                    if(window.confirm('Are you sure you want to reboot this machine?')) {
+                                        try {
+                                            await axios.post(`/api/frontend/machines/${machine.id}/tasks`, {
+                                                task_type: "reboot_system",
+                                                payload: "{}",
+                                                action_id: generateUUID()
+                                            });
+                                            setActionMessage({ type: 'success', text: 'Reboot command sent.' });
+                                            setTimeout(() => setActionMessage(null), 3000);
+                                        } catch (error) {
+                                            console.error("Failed to send reboot command", error);
+                                        }
+                                    }
+                                }}
+                                className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-xs rounded shadow flex items-center"
+                            >
+                                Reboot Machine
+                            </button>
                             {latestAgentVersion !== "unknown" && (!machine.agent_version || machine.agent_version !== latestAgentVersion) && (
                                 <button
                                     onClick={async () => {
@@ -238,8 +583,8 @@ function MachineDetails() {
                                             payload: "{}",
                                             action_id: generateUUID()
                                         });
-                                        setActionMessage("Agent update command sent.");
-                                        setTimeout(() => setActionMessage(""), 3000);
+                                        setActionMessage({ type: 'success', text: 'Agent update command sent.' });
+                                        setTimeout(() => setActionMessage(null), 3000);
                                     } catch (error) {
                                         console.error("Failed to update agent", error);
                                     }
@@ -316,24 +661,43 @@ function MachineDetails() {
                                 </div>
                             </div>
                         </div>
-                        {machine.network_info && (
-                            <div className="pt-4 border-t border-gray-100">
-                                <p className="text-sm text-gray-500 font-semibold uppercase tracking-wider mb-2">Network Interfaces</p>
-                                <div className="text-sm space-y-2 max-h-32 overflow-y-auto">
-                                    {JSON.parse(machine.network_info).map((net, idx) => (
-                                        <div key={idx} className="flex justify-between border-b border-gray-50 pb-1">
-                                            <span className="font-medium text-gray-700">{net.interface}</span>
-                                            <span className="text-gray-500">{net.ip}</span>
+                        <div className="flex items-start">
+                            <Clock className="text-gray-400 mr-3 mt-1" size={20} />
+                            <div>
+                                <p className="text-sm text-gray-500 font-semibold uppercase tracking-wider">Uptime & Reboot</p>
+                                <p><strong>Uptime:</strong> {uptimeDisplay}</p>
+                                <p><strong>Last Reboot:</strong> {lastRebootDisplay}</p>
+                                {machine.reboot_pending && (
+                                    <span className="inline-block mt-1 px-2 py-1 bg-yellow-100 text-yellow-800 text-xs font-semibold rounded border border-yellow-300">
+                                        Reboot Pending
+                                    </span>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Network Grid */}
+                        <div className="pt-4 border-t mt-4">
+                            <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-2">Network Interfaces</h3>
+                            {parsedNetwork.length > 0 ? (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {parsedNetwork.map((net, idx) => (
+                                        <div key={idx} className="bg-gray-50 p-3 rounded border border-gray-200">
+                                            <p className="font-medium text-gray-800">{net.interface}</p>
+                                            <p className="text-sm text-gray-600 font-mono mt-1">IP: {net.ip}</p>
+                                            {net.netmask && <p className="text-xs text-gray-500 font-mono">Mask: {net.netmask}</p>}
                                         </div>
                                     ))}
                                 </div>
-                            </div>
-                        )}
+                            ) : (
+                                <p className="text-gray-500 italic text-sm">No detailed network info reported.</p>
+                            )}
+                        </div>
+
                     </div>
                 </div>
 
                 {/* Updates Panel */}
-                <div className="bg-white p-6 rounded-lg shadow-md border border-gray-200 lg:col-span-2">
+                <div className="bg-white p-6 rounded-lg shadow-md border border-gray-200">
                     <div className="flex justify-between items-center mb-4 border-b pb-2">
                         <h2 className="text-xl font-bold">Software Updates</h2>
                         <div className="flex space-x-2">
@@ -388,13 +752,20 @@ function MachineDetails() {
                                                     <td className="px-4 py-2 font-medium text-gray-900" title={update.description}>{update.package_name}</td>
                                                     <td className="px-4 py-2 text-gray-500">{update.current_version || '-'}</td>
                                                     <td className="px-4 py-2 text-blue-600 font-semibold">{update.new_version}</td>
-                                                    <td className="px-4 py-2">
+                                                    <td className="px-4 py-2 space-x-2">
                                                         <button
                                                             onClick={() => handleInstallUpdate(update.package_name)}
                                                             disabled={activeTasks.length > 0}
                                                             className="text-blue-600 hover:text-blue-900 text-xs font-semibold px-2 py-1 border border-blue-200 rounded hover:bg-blue-50 disabled:opacity-50"
                                                         >
-                                                            Install
+                                                            Update
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleUninstallSoftware(update.package_name)}
+                                                            disabled={activeTasks.length > 0}
+                                                            className="text-red-600 hover:text-red-900 text-xs font-semibold px-2 py-1 border border-red-200 rounded hover:bg-red-50 disabled:opacity-50"
+                                                        >
+                                                            Remove
                                                         </button>
                                                     </td>
                                                 </tr>
@@ -405,22 +776,24 @@ function MachineDetails() {
                             )}
 
                             {/* Install New Software Form */}
-                            <div className="pt-4 border-t">
-                                <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-2">Install New Software (Winget)</h3>
-                                <form onSubmit={handleInstallNewSoftware} className="flex space-x-2">
-                                    <input
-                                        type="text"
-                                        value={installPackageId}
-                                        onChange={(e) => setInstallPackageId(e.target.value)}
-                                        disabled={activeTasks.length > 0}
-                                        placeholder="Enter Winget Package ID (e.g. Mozilla.Firefox)"
-                                        className="flex-grow px-3 py-1.5 border rounded text-sm focus:ring-blue-500 disabled:opacity-50"
-                                        required
-                                    />
-                                    <button type="submit" disabled={activeTasks.length > 0} className="flex items-center bg-blue-600 text-white px-4 py-1.5 rounded text-sm hover:bg-blue-700 disabled:opacity-50">
-                                        <RefreshCw size={14} className={`mr-2 ${activeTasks.length > 0 ? 'animate-spin block' : 'hidden'}`} /> Install
-                                    </button>
-                                </form>
+                            <div className="pt-4 border-t flex flex-col space-y-4">
+                                <div>
+                                    <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-2">Install New Software (Package Manager)</h3>
+                                    <form onSubmit={handleInstallNewSoftware} className="flex space-x-2">
+                                        <input
+                                            type="text"
+                                            value={installPackageId}
+                                            onChange={(e) => setInstallPackageId(e.target.value)}
+                                            disabled={activeTasks.length > 0}
+                                            placeholder="Enter Package ID (e.g. Mozilla.Firefox or firefox)"
+                                            className="flex-grow px-3 py-1.5 border rounded text-sm focus:ring-blue-500 disabled:opacity-50"
+                                            required
+                                        />
+                                        <button type="submit" disabled={activeTasks.length > 0} className="flex items-center bg-blue-600 text-white px-4 py-1.5 rounded text-sm hover:bg-blue-700 disabled:opacity-50 min-w-[100px] justify-center">
+                                            <RefreshCw size={14} className={`mr-2 ${activeTasks.length > 0 ? 'animate-spin block' : 'hidden'}`} /> Install
+                                        </button>
+                                    </form>
+                                </div>
                             </div>
 
                             {/* OS Updates */}
@@ -448,11 +821,15 @@ function MachineDetails() {
                     )}
                 </div>
 
-                {/* Kopia Backup Panel */}
-                <div className="bg-white p-6 rounded-lg shadow-md border border-gray-200 lg:col-span-3">
+            </div> {/* End of Overview Grid */}
+
+            {/* Backups Tab */}
+            <div className={`${activeTab === 'backups' ? 'block' : 'hidden'}`}>
+                {/* Backup Panel */}
+                <div className="bg-white p-6 rounded-lg shadow-md border border-gray-200">
                     <div className="flex items-center mb-4 border-b pb-2">
                         <Archive className="text-purple-600 mr-2" size={24} />
-                        <h2 className="text-xl font-bold">Configure Kopia Backups</h2>
+                        <h2 className="text-xl font-bold">Configure Backups</h2>
                     </div>
                     <form onSubmit={handleConfigureKopia} className="space-y-4">
                         <div>
@@ -478,11 +855,11 @@ function MachineDetails() {
                             </div>
                         </div>
                         <button type="submit" className="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700 transition-colors">
-                            Push Kopia Config to Agent
+                            Push Backup Config to Agent
                         </button>
                     </form>
                     <p className="mt-4 text-sm text-gray-500 italic mb-4">
-                        Note: Kopia server connection settings are managed globally in Settings.
+                        Note: Backup server connection settings are managed globally in Settings.
                     </p>
 
                     {machine.kopia_config && (
@@ -533,6 +910,186 @@ function MachineDetails() {
                             )}
                         </div>
                     )}
+                </div>
+            </div>
+
+            {/* Scheduled Tasks Tab */}
+            <div className={`${activeTab === 'scheduled_tasks' ? 'block' : 'hidden'}`}>
+                <div className="bg-white p-6 rounded-lg shadow-md border border-gray-200">
+                    <div className="flex justify-between items-center mb-4 border-b pb-2">
+                        <div className="flex items-center">
+                            <Clock className="text-blue-600 mr-2" size={24} />
+                            <h2 className="text-xl font-bold">Scheduled Tasks</h2>
+                        </div>
+                        <button
+                            onClick={handleRefreshScheduledTasks}
+                            disabled={activeTasks.length > 0}
+                            className="text-gray-600 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 px-3 py-1 rounded shadow-sm text-sm flex items-center transition-colors disabled:opacity-50"
+                        >
+                            <RefreshCw size={14} className={`mr-1 ${activeTasks.length > 0 ? 'animate-spin block' : ''}`} /> Refresh
+                        </button>
+                    </div>
+
+                    {/* List Tasks */}
+                    <div className="mb-8">
+                        {(() => {
+                            if (scheduledTasks.length === 0) {
+                                return (
+                                    <div className="text-gray-500 py-8 text-center bg-gray-50 rounded border border-dashed border-gray-300">
+                                        No tasks scheduled yet.
+                                    </div>
+                                );
+                            }
+
+                            // Build nested tree structure for hierarchical tasks
+                            const flatTasks = [];
+                            const tree = { name: "Root", children: {}, tasks: [] };
+
+                            scheduledTasks.forEach(task => {
+                                const name = task.task_name || "";
+                                if (name.includes('\\')) {
+                                    const parts = name.split('\\').filter(p => p !== "");
+
+                                    if (parts.length === 1) {
+                                         // It's a root level windows task like \MyTask
+                                         tree.tasks.push({ ...task, shortName: parts[0] });
+                                         return;
+                                    }
+
+                                    const shortName = parts.pop();
+
+                                    let currentNode = tree;
+                                    parts.forEach(part => {
+                                        if (!currentNode.children) currentNode.children = {};
+                                        if (!currentNode.children[part]) {
+                                            currentNode.children[part] = { name: part, children: {}, tasks: [] };
+                                        }
+                                        currentNode = currentNode.children[part];
+                                    });
+
+                                    if (!currentNode.tasks) currentNode.tasks = [];
+                                    currentNode.tasks.push({ ...task, shortName });
+                                } else {
+                                    // Linux cron jobs or other flat tasks
+                                    flatTasks.push({ ...task, shortName: name });
+                                }
+                            });
+
+                            return (
+                                <div>
+                                    {/* Render flat tasks first (if any) in a standard table */}
+                                    {flatTasks.length > 0 && (
+                                        <div className="mb-6">
+                                            <h3 className="text-sm font-semibold text-gray-700 mb-2 uppercase tracking-wider">General Tasks</h3>
+                                            <div className="border border-gray-200 rounded overflow-hidden">
+                                                <table className="min-w-full text-left text-sm whitespace-nowrap">
+                                                    <thead className="uppercase tracking-wider border-b-2 border-gray-200 bg-gray-50">
+                                                        <tr>
+                                                            <th className="px-4 py-2 font-medium text-gray-500 w-1/3">Task Name</th>
+                                                            <th className="px-4 py-2 font-medium text-gray-500 w-1/4">Schedule</th>
+                                                            <th className="px-4 py-2 font-medium text-gray-500 w-1/4">Command / Action</th>
+                                                            <th className="px-4 py-2 font-medium text-gray-500 w-1/6">Controls</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {flatTasks.map((task, idx) => (
+                                                            <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
+                                                                <td className="px-4 py-2 font-medium text-gray-900">{task.shortName}</td>
+                                                                <td className="px-4 py-2 text-gray-600">{task.schedule}</td>
+                                                                <td className="px-4 py-2 text-gray-500 font-mono text-xs truncate max-w-[200px]" title={task.command}>{task.command}</td>
+                                                                <td className="px-4 py-2 space-x-2">
+                                                                    <button
+                                                                        onClick={() => handleRunScheduledTask(task.task_name)}
+                                                                        disabled={activeTasks.length > 0}
+                                                                        className="text-blue-600 hover:text-blue-900 text-xs font-semibold px-2 py-1 border border-blue-200 rounded hover:bg-blue-50 disabled:opacity-50"
+                                                                    >
+                                                                        Run Now
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={() => handleDeleteScheduledTask(task.task_name)}
+                                                                        disabled={activeTasks.length > 0}
+                                                                        className="text-red-600 hover:text-red-900 text-xs font-semibold px-2 py-1 border border-red-200 rounded hover:bg-red-50 disabled:opacity-50"
+                                                                    >
+                                                                        Delete
+                                                                    </button>
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Render Windows Task Tree */}
+                                    {(Object.keys(tree.children || {}).length > 0 || tree.tasks.length > 0) && (
+                                        <div>
+                                            <h3 className="text-sm font-semibold text-gray-700 mb-2 uppercase tracking-wider">Windows Task Library</h3>
+                                            <TaskFolder
+                                                node={{...tree, name: "\\ (Root)"}}
+                                                onRun={handleRunScheduledTask}
+                                                onDelete={handleDeleteScheduledTask}
+                                                disabled={activeTasks.length > 0}
+                                            />
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })()}
+                    </div>
+
+                    {/* Add Task Form */}
+                    <div className="pt-6 border-t border-gray-200">
+                        <h3 className="text-lg font-semibold text-gray-800 mb-4">Add New Task</h3>
+                        <form onSubmit={handleAddScheduledTask} className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Task Name</label>
+                                <input
+                                    type="text"
+                                    value={newTaskName}
+                                    onChange={(e) => setNewTaskName(e.target.value)}
+                                    placeholder="e.g. DailyCleanup"
+                                    className="w-full px-3 py-2 border rounded-md focus:ring-blue-500 focus:border-blue-500 text-sm disabled:opacity-50"
+                                    required
+                                    disabled={activeTasks.length > 0}
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Schedule <span className="text-xs text-gray-500 font-normal">({machine?.os_name === 'Windows' ? 'e.g. ONCE, DAILY, MINUTE' : 'Cron e.g. 0 0 * * *'})</span>
+                                </label>
+                                <input
+                                    type="text"
+                                    value={newTaskSchedule}
+                                    onChange={(e) => setNewTaskSchedule(e.target.value)}
+                                    placeholder={machine?.os_name === 'Windows' ? 'ONCE' : '0 0 * * *'}
+                                    className="w-full px-3 py-2 border rounded-md focus:ring-blue-500 focus:border-blue-500 text-sm disabled:opacity-50"
+                                    disabled={activeTasks.length > 0}
+                                />
+                            </div>
+                            <div className="md:col-span-2">
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Command / Script</label>
+                                <input
+                                    type="text"
+                                    value={newTaskCommand}
+                                    onChange={(e) => setNewTaskCommand(e.target.value)}
+                                    placeholder="e.g. winget upgrade --all or /usr/bin/apt update"
+                                    className="w-full px-3 py-2 border rounded-md focus:ring-blue-500 focus:border-blue-500 text-sm disabled:opacity-50"
+                                    required
+                                    disabled={activeTasks.length > 0}
+                                />
+                            </div>
+                            <div className="md:col-span-3 flex justify-end">
+                                <button
+                                    type="submit"
+                                    disabled={activeTasks.length > 0}
+                                    className="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center"
+                                >
+                                    <RefreshCw size={16} className={`mr-2 ${activeTasks.length > 0 ? 'animate-spin block' : 'hidden'}`} /> Add Task
+                                </button>
+                            </div>
+                        </form>
+                    </div>
                 </div>
             </div>
 
