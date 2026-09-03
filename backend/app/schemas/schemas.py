@@ -119,6 +119,23 @@ class AgentTask(AgentTaskBase):
         orm_mode = True
         from_attributes = True
 
+
+class ScheduledTaskBase(BaseModel):
+    task_name: str
+    schedule: str
+    command: str
+
+class ScheduledTaskCreate(ScheduledTaskBase):
+    pass
+
+class ScheduledTask(ScheduledTaskBase):
+    id: int
+    machine_id: int
+
+    class Config:
+        orm_mode = True
+        from_attributes = True
+
 class GlobalSettingsBase(BaseModel):
     key: str
     value: str

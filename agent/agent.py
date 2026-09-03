@@ -1097,6 +1097,20 @@ def main_loop():
             logger.error(f"Initial registration failed: {e}. Retrying in 5 seconds...")
             time.sleep(5)
 
+    logger.info(f"Successfully registered as machine ID: {MACHINE_ID}")
+    # Fetch and submit scheduled tasks on startup
+    try:
+        _, tasks_json = execute_task({"task_type": "list_scheduled_tasks", "payload": "{}"})
+        task_res = requests.post(
+            f"{SERVER_URL}/api/agent/{MACHINE_ID}/scheduled-tasks/sync",
+            json={"result_message": tasks_json},
+            headers=HEADERS
+        )
+        if task_res.status_code == 200:
+            logger.info("Successfully reported initial scheduled tasks to server.")
+    except Exception as e:
+        logger.error(f"Failed to report initial scheduled tasks: {e}")
+
     # Start heartbeat in background
     threading.Thread(target=heartbeat_loop, daemon=True).start()
 

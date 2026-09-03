@@ -107,7 +107,7 @@ function MachineDetails() {
     const [kopiaPaths, setKopiaPaths] = useState("");
     const [installPackageId, setInstallPackageId] = useState("");
     const [scheduleDate, setScheduleDate] = useState("");
-    const [actionMessage, setActionMessage] = useState("");
+    const [actionMessage, setActionMessage] = useState(null);
     const [isBrowserOpen, setIsBrowserOpen] = useState(false);
     const [isLogsOpen, setIsLogsOpen] = useState(false);
     const [isEventLogsOpen, setIsEventLogsOpen] = useState(false);
@@ -184,18 +184,17 @@ function MachineDetails() {
                  setActiveTasks(updatedTasks);
                  // Don't show raw JSON dumps for list tasks as action messages
                  if (finalMessage && !finalMessage.startsWith('[') && !finalMessage.includes('FlatLinuxTask')) {
-                     setActionMessage(finalMessage);
-                     setTimeout(() => setActionMessage(""), 5000);
-                 } else if (finalMessage.startsWith('Task completed successfully')) {
-                     // The actual message format is "Task completed successfully: [json array]"
-                     // We should just show a generic success or nothing
-                     if (!finalMessage.includes('[{')) {
-                        setActionMessage(finalMessage);
-                        setTimeout(() => setActionMessage(""), 5000);
+                     const isSuccess = finalMessage.startsWith('Task completed successfully');
+
+                     if (isSuccess && finalMessage.includes('[{')) {
+                        setActionMessage({ type: 'success', text: 'Tasks refreshed successfully.' });
                      } else {
-                        setActionMessage("Tasks refreshed.");
-                        setTimeout(() => setActionMessage(""), 2000);
+                        setActionMessage({
+                            type: isSuccess ? 'success' : 'error',
+                            text: finalMessage
+                        });
                      }
+                     setTimeout(() => setActionMessage(null), 5000);
                  }
             }
         };
@@ -217,9 +216,9 @@ function MachineDetails() {
             const res = await axios.post(`/api/frontend/machines/${id}/tasks`, taskData);
             setActiveTasks(prev => [...prev, res.data.id]);
 
-            setActionMessage(`Task to update ${packageName || 'all packages'} submitted!${scheduleDate ? ' (Scheduled)' : ''}`);
+            setActionMessage({ type: 'success', text: `Task to update ${packageName || 'all packages'} submitted!${scheduleDate ? ' (Scheduled)' : ''}` });
             setScheduleDate("");
-            setTimeout(() => setActionMessage(""), 3000);
+            setTimeout(() => setActionMessage(null), 3000);
         } catch (error) {
             console.error("Error scheduling update", error);
         }
@@ -233,8 +232,8 @@ function MachineDetails() {
                 action_id: generateUUID()
             });
             setActiveTasks(prev => [...prev, res.data.id]);
-            setActionMessage("Task to check for updates submitted. Checking agent in background...");
-            setTimeout(() => setActionMessage(""), 5000);
+            setActionMessage({ type: 'success', text: 'Task to check for updates submitted. Checking agent in background...' });
+            setTimeout(() => setActionMessage(null), 5000);
         } catch (error) {
             console.error("Error scheduling update check", error);
         }
@@ -253,10 +252,10 @@ function MachineDetails() {
             }
             const res = await axios.post(`/api/frontend/machines/${id}/tasks`, taskData);
             setActiveTasks(prev => [...prev, res.data.id]);
-            setActionMessage(`Task to install ${installPackageId} submitted!${scheduleDate ? ' (Scheduled)' : ''}`);
+            setActionMessage({ type: 'success', text: `Task to install ${installPackageId} submitted!${scheduleDate ? ' (Scheduled)' : ''}` });
             setInstallPackageId("");
             setScheduleDate("");
-            setTimeout(() => setActionMessage(""), 3000);
+            setTimeout(() => setActionMessage(null), 3000);
 
             // Re-fetch updates list shortly after submitting task
             setTimeout(async () => {
@@ -287,9 +286,9 @@ function MachineDetails() {
             }
             const res = await axios.post(`/api/frontend/machines/${id}/tasks`, taskData);
             setActiveTasks(prev => [...prev, res.data.id]);
-            setActionMessage(`Task to uninstall ${packageName} submitted!${scheduleDate ? ' (Scheduled)' : ''}`);
+            setActionMessage({ type: 'success', text: `Task to uninstall ${packageName} submitted!${scheduleDate ? ' (Scheduled)' : ''}` });
             setScheduleDate("");
-            setTimeout(() => setActionMessage(""), 3000);
+            setTimeout(() => setActionMessage(null), 3000);
 
             // Re-fetch updates list shortly after submitting task
             setTimeout(async () => {
@@ -303,7 +302,19 @@ function MachineDetails() {
         }
     };
 
-    const fetchScheduledTasks = async () => {
+const fetchScheduledTasks = async () => {
+        try {
+            const token = localStorage.getItem('token');
+            const res = await axios.get(`/api/frontend/machines/${id}/scheduled-tasks`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            setScheduledTasks(res.data);
+        } catch (error) {
+            console.error("Error fetching cached scheduled tasks", error);
+        }
+    };
+
+    const handleRefreshScheduledTasks = async () => {
         try {
             const token = localStorage.getItem('token');
             const res = await axios.post(`/api/frontend/machines/${id}/tasks`, {
@@ -311,37 +322,35 @@ function MachineDetails() {
                 payload: JSON.stringify({}),
                 action_id: generateUUID()
             }, { headers: { Authorization: `Bearer ${token}` } });
-            setActiveTasks(prev => [...prev, res.data.id]);
-            setActionMessage("Fetching scheduled tasks...");
-            setTimeout(() => setActionMessage(""), 3000);
 
-            // In a more robust system, we would subscribe to the task completion via SSE.
-            // For now, we will poll specifically for this task's result after a delay.
+            setActiveTasks(prev => [...prev, res.data.id]);
+            setActionMessage({ type: 'info', text: 'Fetching latest tasks from agent...' });
+
+            // Poll for completion to update cache
             const pollTaskId = res.data.id;
             let attempts = 0;
             const interval = setInterval(async () => {
                 attempts++;
                 try {
-                    const taskRes = await axios.get(`/api/frontend/machines/${id}/tasks/${pollTaskId}`);
+                    const taskRes = await axios.get(`/api/frontend/machines/${id}/tasks/${pollTaskId}`, {
+                        headers: { Authorization: `Bearer ${token}` }
+                    });
                     if (taskRes.data.status === 'completed') {
                         clearInterval(interval);
-                        try {
-                            const parsed = JSON.parse(taskRes.data.result_message);
-                            setScheduledTasks(parsed);
-                        } catch(e) {
-                             console.error("Failed to parse task result", e);
-                        }
-                    } else if (taskRes.data.status === 'failed' || attempts > 10) {
+                        // Fetch the newly updated cache
+                        fetchScheduledTasks();
+                    } else if (taskRes.data.status === 'failed' || attempts > 20) {
                         clearInterval(interval);
                     }
                 } catch(e) {}
             }, 1000);
+
         } catch (error) {
-            console.error("Error listing scheduled tasks", error);
+            console.error("Error asking agent to refresh tasks", error);
         }
     };
 
-    const handleAddScheduledTask = async (e) => {
+        const handleAddScheduledTask = async (e) => {
         e.preventDefault();
         try {
             const token = localStorage.getItem('token');
@@ -355,11 +364,11 @@ function MachineDetails() {
                 action_id: generateUUID()
             }, { headers: { Authorization: `Bearer ${token}` } });
             setActiveTasks(prev => [...prev, res.data.id]);
-            setActionMessage(`Task to add scheduled task '${newTaskName}' submitted!`);
+            setActionMessage({ type: 'success', text: `Task to add scheduled task '${newTaskName}' submitted!` });
             setNewTaskName("");
             setNewTaskCommand("");
             setNewTaskSchedule("");
-            setTimeout(() => setActionMessage(""), 3000);
+            setTimeout(() => setActionMessage(null), 3000);
 
             // Re-fetch after a delay
             setTimeout(fetchScheduledTasks, 4000);
@@ -378,8 +387,8 @@ function MachineDetails() {
                 action_id: generateUUID()
             }, { headers: { Authorization: `Bearer ${token}` } });
             setActiveTasks(prev => [...prev, res.data.id]);
-            setActionMessage(`Task to delete scheduled task '${taskName}' submitted!`);
-            setTimeout(() => setActionMessage(""), 3000);
+            setActionMessage({ type: 'success', text: `Task to delete scheduled task '${taskName}' submitted!` });
+            setTimeout(() => setActionMessage(null), 3000);
 
             // Re-fetch after a delay
             setTimeout(fetchScheduledTasks, 4000);
@@ -397,8 +406,8 @@ function MachineDetails() {
                 action_id: generateUUID()
             }, { headers: { Authorization: `Bearer ${token}` } });
             setActiveTasks(prev => [...prev, res.data.id]);
-            setActionMessage(`Task to run scheduled task '${taskName}' submitted!`);
-            setTimeout(() => setActionMessage(""), 3000);
+            setActionMessage({ type: 'success', text: `Task to run scheduled task '${taskName}' submitted!` });
+            setTimeout(() => setActionMessage(null), 3000);
         } catch (error) {
             console.error("Error running scheduled task", error);
         }
@@ -420,9 +429,9 @@ function MachineDetails() {
                 payload: JSON.stringify({ paths: pathsArray }),
                 action_id: generateUUID()
             });
-            setActionMessage("Kopia configuration task submitted!");
+            setActionMessage({ type: 'success', text: 'Kopia configuration task submitted!' });
             setKopiaPaths("");
-            setTimeout(() => setActionMessage(""), 3000);
+            setTimeout(() => setActionMessage(null), 3000);
         } catch (error) {
             console.error("Error scheduling Kopia config", error);
         }
@@ -453,8 +462,22 @@ function MachineDetails() {
             </Link>
 
             {actionMessage && (
-                <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded mb-4">
-                    {actionMessage}
+                <div className={`px-4 py-3 rounded mb-4 border flex justify-between items-start shadow-sm
+                    ${actionMessage.type === 'error' ? 'bg-red-50 border-red-200 text-red-700' :
+                      actionMessage.type === 'warning' ? 'bg-yellow-50 border-yellow-200 text-yellow-700' :
+                      actionMessage.type === 'info' ? 'bg-blue-50 border-blue-200 text-blue-700' :
+                      'bg-green-50 border-green-200 text-green-700'}`}>
+                    <div className="flex-1">
+                        <p className="line-clamp-2" title={actionMessage.text}>
+                            {actionMessage.text}
+                        </p>
+                        {actionMessage.text && actionMessage.text.length > 150 && (
+                            <p className="text-xs mt-1 opacity-75 italic">(Message truncated. Check logs for more details)</p>
+                        )}
+                    </div>
+                    <button onClick={() => setActionMessage(null)} className="ml-4 opacity-60 hover:opacity-100">
+                        &times;
+                    </button>
                 </div>
             )}
 
@@ -520,8 +543,8 @@ function MachineDetails() {
                                             payload: "{}",
                                             action_id: generateUUID()
                                         });
-                                        setActionMessage("Agent update command sent.");
-                                        setTimeout(() => setActionMessage(""), 3000);
+                                        setActionMessage({ type: 'success', text: 'Agent update command sent.' });
+                                        setTimeout(() => setActionMessage(null), 3000);
                                     } catch (error) {
                                         console.error("Failed to update agent", error);
                                     }
@@ -840,7 +863,7 @@ function MachineDetails() {
                             <h2 className="text-xl font-bold">Scheduled Tasks</h2>
                         </div>
                         <button
-                            onClick={fetchScheduledTasks}
+                            onClick={handleRefreshScheduledTasks}
                             disabled={activeTasks.length > 0}
                             className="text-gray-600 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 px-3 py-1 rounded shadow-sm text-sm flex items-center transition-colors disabled:opacity-50"
                         >

@@ -24,6 +24,7 @@ class Machine(Base):
 
     updates = relationship("PendingUpdate", back_populates="machine", cascade="all, delete-orphan")
     tasks = relationship("AgentTask", back_populates="machine", cascade="all, delete-orphan")
+    scheduled_tasks = relationship("ScheduledTask", back_populates="machine", cascade="all, delete-orphan")
 
 class PendingUpdate(Base):
     __tablename__ = "pending_updates"
@@ -53,6 +54,18 @@ class AgentTask(Base):
     action_id = Column(String, nullable=True) # UUID correlating user action
 
     machine = relationship("Machine", back_populates="tasks")
+
+
+class ScheduledTask(Base):
+    __tablename__ = "scheduled_tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    machine_id = Column(Integer, ForeignKey("machines.id"))
+    task_name = Column(String, nullable=False)
+    schedule = Column(String, nullable=False)
+    command = Column(String, nullable=False)
+
+    machine = relationship("Machine", back_populates="scheduled_tasks")
 
 class GlobalSettings(Base):
     __tablename__ = "global_settings"
