@@ -28,7 +28,6 @@ class Machine(MachineBase):
     pending_os_updates: Optional[int] = 0
 
     class Config:
-        orm_mode = True
         from_attributes = True
 
 class TaskResultBody(BaseModel):
@@ -50,7 +49,6 @@ class PendingUpdate(PendingUpdateBase):
     machine_id: int
 
     class Config:
-        orm_mode = True
         from_attributes = True
 
 class AgentTaskBase(BaseModel):
@@ -77,7 +75,6 @@ class OSEventLog(BaseModel):
     source: Optional[str] = None
 
     class Config:
-        orm_mode = True
         from_attributes = True
 
 class AgentLog(BaseModel):
@@ -89,7 +86,6 @@ class AgentLog(BaseModel):
     action_id: Optional[str] = None
 
     class Config:
-        orm_mode = True
         from_attributes = True
 
 class AuditLog(BaseModel):
@@ -101,7 +97,6 @@ class AuditLog(BaseModel):
     action_id: Optional[str] = None
 
     class Config:
-        orm_mode = True
         from_attributes = True
 
 class AgentTaskCreate(AgentTaskBase):
@@ -118,7 +113,6 @@ class AgentTask(AgentTaskBase):
     action_id: Optional[str] = None
 
     class Config:
-        orm_mode = True
         from_attributes = True
 
 
@@ -135,7 +129,6 @@ class ScheduledTask(ScheduledTaskBase):
     machine_id: int
 
     class Config:
-        orm_mode = True
         from_attributes = True
 
 class GlobalSettingsBase(BaseModel):
@@ -144,5 +137,4 @@ class GlobalSettingsBase(BaseModel):
 
 class GlobalSettings(GlobalSettingsBase):
     class Config:
-        orm_mode = True
         from_attributes = True

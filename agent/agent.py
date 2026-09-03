@@ -9,7 +9,7 @@ import os
 import argparse
 import logging
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 import websocket
 import signal
 import sys
@@ -35,7 +35,7 @@ class BufferedServerLogHandler(logging.Handler):
     def emit(self, record):
         try:
             log_entry = {
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "level": record.levelname,
                 "message": self.format(record),
                 "module": record.module,
@@ -266,7 +266,7 @@ def get_system_info():
 
     # Uptime / Boot time
     try:
-        boot_time = psutil.boot_time()
+        boot_time = int(psutil.boot_time())
     except Exception:
         boot_time = None
 
