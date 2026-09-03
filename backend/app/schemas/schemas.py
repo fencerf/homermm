@@ -14,6 +14,8 @@ class MachineBase(BaseModel):
     ip_address: str
     network_info: Optional[str] = None
     agent_version: Optional[str] = None
+    boot_time: Optional[int] = None
+    reboot_pending: Optional[bool] = False
 
 class MachineCreate(MachineBase):
     pass

@@ -263,6 +263,35 @@ def get_system_info():
     except Exception:
         kopia_config = "[]"
 
+
+    # Uptime / Boot time
+    try:
+        boot_time = psutil.boot_time()
+    except Exception:
+        boot_time = None
+
+    # Pending Reboot Check
+    reboot_pending = False
+    try:
+        if os_name == "Windows":
+            import winreg
+            try:
+                # Check standard pending reboot key
+                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending")
+                winreg.CloseKey(key)
+                reboot_pending = True
+            except WindowsError:
+                try:
+                    key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired")
+                    winreg.CloseKey(key)
+                    reboot_pending = True
+                except WindowsError:
+                    pass
+        elif os_name == "Linux":
+            reboot_pending = os.path.exists("/var/run/reboot-required")
+    except Exception:
+        pass
+
     # Network
     hostname = socket.gethostname()
     ip_address = socket.gethostbyname(hostname)
@@ -292,7 +321,9 @@ def get_system_info():
         "kopia_config": kopia_config,
         "ip_address": ip_address,
         "network_info": json.dumps(network_info) if network_info else None,
-        "agent_version": AGENT_VERSION
+        "agent_version": AGENT_VERSION,
+        "boot_time": boot_time,
+        "reboot_pending": reboot_pending
     }
 
 def get_available_updates():
@@ -904,6 +935,17 @@ def execute_task(task):
         threading.Thread(target=do_update, daemon=True).start()
         return "completed", "Agent is downloading update and restarting."
 
+    elif task_type == "reboot_system":
+        try:
+            if platform.system() == "Windows":
+                subprocess.run(["shutdown", "/r", "/t", "0"], check=True)
+            else:
+                subprocess.run(["sudo", "reboot"], check=True)
+            return "completed", "Reboot initiated successfully."
+        except subprocess.CalledProcessError as e:
+            return "failed", f"Failed to initiate reboot: {e}"
+        except Exception as e:
+            return "failed", str(e)
     elif task_type == "list_scheduled_tasks":
         # Native OS abstractions
         tasks = []

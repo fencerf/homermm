@@ -21,6 +21,8 @@ class Machine(Base):
     is_online = Column(Boolean, default=True)
     kopia_config = Column(Text, nullable=True) # JSON string of kopia policies
     agent_version = Column(String, nullable=True)
+    boot_time = Column(Integer, nullable=True) # Unix timestamp of boot time
+    reboot_pending = Column(Boolean, default=False)
 
     updates = relationship("PendingUpdate", back_populates="machine", cascade="all, delete-orphan")
     tasks = relationship("AgentTask", back_populates="machine", cascade="all, delete-orphan")

@@ -56,6 +56,16 @@ def init_db():
             pass
 
         try:
+            conn.execute(text("ALTER TABLE machines ADD COLUMN boot_time INTEGER"))
+        except Exception:
+            pass
+
+        try:
+            conn.execute(text("ALTER TABLE machines ADD COLUMN reboot_pending BOOLEAN DEFAULT 0"))
+        except Exception:
+            pass
+
+        try:
             conn.execute(text("ALTER TABLE agent_tasks ADD COLUMN action_id VARCHAR"))
         except Exception:
             pass

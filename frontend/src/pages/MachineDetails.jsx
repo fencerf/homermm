@@ -453,6 +453,26 @@ const fetchScheduledTasks = async () => {
         }
     }
 
+    let parsedNetwork = [];
+    if (machine && machine.network_info) {
+        try {
+            parsedNetwork = JSON.parse(machine.network_info);
+        } catch(e) {}
+    }
+
+    // Calculate uptime if boot_time is present
+    let uptimeDisplay = "Unknown";
+    let lastRebootDisplay = "Unknown";
+    if (machine && machine.boot_time) {
+        const bootDate = new Date(machine.boot_time * 1000);
+        lastRebootDisplay = bootDate.toLocaleString();
+
+        const diffMs = Date.now() - bootDate.getTime();
+        const diffDays = Math.floor(diffMs / 86400000);
+        const diffHrs = Math.floor((diffMs % 86400000) / 3600000);
+        uptimeDisplay = `${diffDays} days, ${diffHrs} hours`;
+    }
+
     if (!machine) return <div className="p-6">Loading...</div>;
 
     return (
@@ -516,7 +536,7 @@ const fetchScheduledTasks = async () => {
             </div>
 
             {/* Tab Content */}
-            <div className={`${activeTab === 'overview' ? 'grid grid-cols-1 lg:grid-cols-3 gap-6' : 'hidden'}`}>
+            <div className={`${activeTab === 'overview' ? 'flex flex-col space-y-6' : 'hidden'}`}>
                 {/* Hardware Info Panel */}
                 <div className="bg-white p-6 rounded-lg shadow-md border border-gray-200">
                     <div className="flex justify-between items-center border-b pb-2 mb-4">
@@ -533,6 +553,26 @@ const fetchScheduledTasks = async () => {
                                 className="px-3 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 text-xs rounded shadow flex items-center"
                             >
                                 Event Logs
+                            </button>
+                            <button
+                                onClick={async () => {
+                                    if(window.confirm('Are you sure you want to reboot this machine?')) {
+                                        try {
+                                            await axios.post(`/api/frontend/machines/${machine.id}/tasks`, {
+                                                task_type: "reboot_system",
+                                                payload: "{}",
+                                                action_id: generateUUID()
+                                            });
+                                            setActionMessage({ type: 'success', text: 'Reboot command sent.' });
+                                            setTimeout(() => setActionMessage(null), 3000);
+                                        } catch (error) {
+                                            console.error("Failed to send reboot command", error);
+                                        }
+                                    }
+                                }}
+                                className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-xs rounded shadow flex items-center"
+                            >
+                                Reboot Machine
                             </button>
                             {latestAgentVersion !== "unknown" && (!machine.agent_version || machine.agent_version !== latestAgentVersion) && (
                                 <button
@@ -621,24 +661,43 @@ const fetchScheduledTasks = async () => {
                                 </div>
                             </div>
                         </div>
-                        {machine.network_info && (
-                            <div className="pt-4 border-t border-gray-100">
-                                <p className="text-sm text-gray-500 font-semibold uppercase tracking-wider mb-2">Network Interfaces</p>
-                                <div className="text-sm space-y-2 max-h-32 overflow-y-auto">
-                                    {JSON.parse(machine.network_info).map((net, idx) => (
-                                        <div key={idx} className="flex justify-between border-b border-gray-50 pb-1">
-                                            <span className="font-medium text-gray-700">{net.interface}</span>
-                                            <span className="text-gray-500">{net.ip}</span>
+                        <div className="flex items-start">
+                            <Clock className="text-gray-400 mr-3 mt-1" size={20} />
+                            <div>
+                                <p className="text-sm text-gray-500 font-semibold uppercase tracking-wider">Uptime & Reboot</p>
+                                <p><strong>Uptime:</strong> {uptimeDisplay}</p>
+                                <p><strong>Last Reboot:</strong> {lastRebootDisplay}</p>
+                                {machine.reboot_pending && (
+                                    <span className="inline-block mt-1 px-2 py-1 bg-yellow-100 text-yellow-800 text-xs font-semibold rounded border border-yellow-300">
+                                        Reboot Pending
+                                    </span>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Network Grid */}
+                        <div className="pt-4 border-t mt-4">
+                            <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-2">Network Interfaces</h3>
+                            {parsedNetwork.length > 0 ? (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {parsedNetwork.map((net, idx) => (
+                                        <div key={idx} className="bg-gray-50 p-3 rounded border border-gray-200">
+                                            <p className="font-medium text-gray-800">{net.interface}</p>
+                                            <p className="text-sm text-gray-600 font-mono mt-1">IP: {net.ip}</p>
+                                            {net.netmask && <p className="text-xs text-gray-500 font-mono">Mask: {net.netmask}</p>}
                                         </div>
                                     ))}
                                 </div>
-                            </div>
-                        )}
+                            ) : (
+                                <p className="text-gray-500 italic text-sm">No detailed network info reported.</p>
+                            )}
+                        </div>
+
                     </div>
                 </div>
 
                 {/* Updates Panel */}
-                <div className="bg-white p-6 rounded-lg shadow-md border border-gray-200 lg:col-span-2">
+                <div className="bg-white p-6 rounded-lg shadow-md border border-gray-200">
                     <div className="flex justify-between items-center mb-4 border-b pb-2">
                         <h2 className="text-xl font-bold">Software Updates</h2>
                         <div className="flex space-x-2">
