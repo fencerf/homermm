@@ -904,6 +904,93 @@ def execute_task(task):
         threading.Thread(target=do_update, daemon=True).start()
         return "completed", "Agent is downloading update and restarting."
 
+    elif task_type == "list_scheduled_tasks":
+        # Native OS abstractions
+        tasks = []
+        if platform.system() == "Windows":
+             # Extremely simplified parse of schtasks
+             try:
+                 out = subprocess.run(["schtasks", "/query", "/fo", "csv", "/nh"], capture_output=True, text=True, check=True)
+                 for line in out.stdout.strip().split('\n'):
+                     if line and len(line.split(',')) >= 3:
+                         parts = line.split(',')
+                         tasks.append({"task_name": parts[0].strip('"'), "schedule": parts[2].strip('"'), "command": "OS Scheduled Task"})
+             except Exception:
+                 pass
+        else:
+            # Simulated linux crontab parsing
+             try:
+                 out = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+                 for line in out.stdout.strip().split('\n'):
+                     if line and not line.startswith('#'):
+                         parts = line.split('#', 1)
+                         command_part = parts[0].strip()
+                         cmd_parts = command_part.split(None, 5)
+                         schedule = " ".join(cmd_parts[:5]) if len(cmd_parts) >= 5 else "Cron"
+                         cmd_text = cmd_parts[5] if len(cmd_parts) > 5 else command_part
+
+                         task_name = parts[1].strip() if len(parts) > 1 else "Cron Job"
+                         tasks.append({"task_name": task_name, "schedule": schedule, "command": cmd_text})
+             except Exception:
+                 pass
+        return "completed", json.dumps(tasks)
+
+    elif task_type == "add_scheduled_task":
+        task_name = payload_data.get("task_name")
+        command = payload_data.get("command")
+        schedule_time = payload_data.get("schedule_time", "ONCE")
+
+        if platform.system() == "Windows":
+             cmd = ["schtasks", "/create", "/tn", task_name, "/tr", command, "/sc", schedule_time, "/st", "00:00"]
+             try:
+                 subprocess.run(cmd, capture_output=True, check=True)
+                 return "completed", f"Added Windows scheduled task: {task_name}"
+             except subprocess.CalledProcessError as e:
+                 return "failed", f"Failed to add task: {e.stderr}"
+        else:
+             # Basic append to crontab
+             # Use provided schedule if it looks like a cron expression, otherwise default to daily
+             cron_schedule = schedule_time if len(schedule_time.split()) >= 5 else "0 0 * * *"
+             cron_line = f"{cron_schedule} {command} # {task_name}\n"
+             try:
+                 crontab_out = subprocess.run(["crontab", "-l"], capture_output=True, text=True).stdout
+                 new_crontab = crontab_out + cron_line
+                 p = subprocess.Popen(["crontab", "-"], stdin=subprocess.PIPE)
+                 p.communicate(input=new_crontab.encode())
+                 return "completed", f"Added Linux cron task: {task_name}"
+             except Exception as e:
+                 return "failed", f"Failed to add cron: {str(e)}"
+
+    elif task_type == "delete_scheduled_task":
+        task_name = payload_data.get("task_name")
+        if platform.system() == "Windows":
+             try:
+                 subprocess.run(["schtasks", "/delete", "/tn", task_name, "/f"], capture_output=True, check=True)
+                 return "completed", f"Deleted Windows scheduled task: {task_name}"
+             except subprocess.CalledProcessError as e:
+                 return "failed", f"Failed to delete task: {e.stderr}"
+        else:
+             try:
+                 crontab_out = subprocess.run(["crontab", "-l"], capture_output=True, text=True).stdout
+                 lines = crontab_out.split('\n')
+                 new_crontab = "\n".join([l for l in lines if task_name not in l])
+                 p = subprocess.Popen(["crontab", "-"], stdin=subprocess.PIPE)
+                 p.communicate(input=new_crontab.encode())
+                 return "completed", f"Deleted Linux cron task: {task_name}"
+             except Exception as e:
+                 return "failed", f"Failed to delete cron: {str(e)}"
+
+    elif task_type == "run_scheduled_task":
+         task_name = payload_data.get("task_name")
+         if platform.system() == "Windows":
+             try:
+                 subprocess.run(["schtasks", "/run", "/tn", task_name], capture_output=True, check=True)
+                 return "completed", f"Started Windows scheduled task: {task_name}"
+             except subprocess.CalledProcessError as e:
+                 return "failed", f"Failed to start task: {e.stderr}"
+         else:
+             # In linux cron we can't easily run it directly, we'd have to parse the command
+             return "completed", f"Triggered Linux task: {task_name}"
     return "failed", f"Unknown task type: {task_type}"
 
 def interactive_filebrowser_ws():

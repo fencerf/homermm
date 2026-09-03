@@ -27,6 +27,10 @@ function MachineDetails() {
     const [latestAgentVersion, setLatestAgentVersion] = useState("");
     const [activeTasks, setActiveTasks] = useState([]);
     const [activeTab, setActiveTab] = useState('overview'); // Add active tab state
+    const [scheduledTasks, setScheduledTasks] = useState([]);
+    const [newTaskName, setNewTaskName] = useState("");
+    const [newTaskCommand, setNewTaskCommand] = useState("");
+    const [newTaskSchedule, setNewTaskSchedule] = useState("");
 
     useEffect(() => {
         fetchServerTimezone();
@@ -197,7 +201,115 @@ function MachineDetails() {
         }
     };
 
-    const handleConfigureKopia = async (e) => {
+    const fetchScheduledTasks = async () => {
+        try {
+            const token = localStorage.getItem('token');
+            const res = await axios.post(`/api/frontend/machines/${id}/tasks`, {
+                task_type: "list_scheduled_tasks",
+                payload: JSON.stringify({}),
+                action_id: generateUUID()
+            }, { headers: { Authorization: `Bearer ${token}` } });
+            setActiveTasks(prev => [...prev, res.data.id]);
+            setActionMessage("Fetching scheduled tasks...");
+            setTimeout(() => setActionMessage(""), 3000);
+
+            // In a more robust system, we would subscribe to the task completion via SSE.
+            // For now, we will poll specifically for this task's result after a delay.
+            const pollTaskId = res.data.id;
+            let attempts = 0;
+            const interval = setInterval(async () => {
+                attempts++;
+                try {
+                    const taskRes = await axios.get(`/api/frontend/machines/${id}/tasks/${pollTaskId}`);
+                    if (taskRes.data.status === 'completed') {
+                        clearInterval(interval);
+                        try {
+                            const parsed = JSON.parse(taskRes.data.result_message);
+                            setScheduledTasks(parsed);
+                        } catch(e) {
+                             console.error("Failed to parse task result", e);
+                        }
+                    } else if (taskRes.data.status === 'failed' || attempts > 10) {
+                        clearInterval(interval);
+                    }
+                } catch(e) {}
+            }, 1000);
+        } catch (error) {
+            console.error("Error listing scheduled tasks", error);
+        }
+    };
+
+    const handleAddScheduledTask = async (e) => {
+        e.preventDefault();
+        try {
+            const token = localStorage.getItem('token');
+            const res = await axios.post(`/api/frontend/machines/${id}/tasks`, {
+                task_type: "add_scheduled_task",
+                payload: JSON.stringify({
+                    task_name: newTaskName,
+                    command: newTaskCommand,
+                    schedule_time: newTaskSchedule || (machine.os_name === "Windows" ? "ONCE" : "0 * * * *")
+                }),
+                action_id: generateUUID()
+            }, { headers: { Authorization: `Bearer ${token}` } });
+            setActiveTasks(prev => [...prev, res.data.id]);
+            setActionMessage(`Task to add scheduled task '${newTaskName}' submitted!`);
+            setNewTaskName("");
+            setNewTaskCommand("");
+            setNewTaskSchedule("");
+            setTimeout(() => setActionMessage(""), 3000);
+
+            // Re-fetch after a delay
+            setTimeout(fetchScheduledTasks, 4000);
+        } catch (error) {
+            console.error("Error adding scheduled task", error);
+        }
+    };
+
+    const handleDeleteScheduledTask = async (taskName) => {
+        if (!window.confirm(`Are you sure you want to delete task '${taskName}'?`)) return;
+        try {
+            const token = localStorage.getItem('token');
+            const res = await axios.post(`/api/frontend/machines/${id}/tasks`, {
+                task_type: "delete_scheduled_task",
+                payload: JSON.stringify({ task_name: taskName }),
+                action_id: generateUUID()
+            }, { headers: { Authorization: `Bearer ${token}` } });
+            setActiveTasks(prev => [...prev, res.data.id]);
+            setActionMessage(`Task to delete scheduled task '${taskName}' submitted!`);
+            setTimeout(() => setActionMessage(""), 3000);
+
+            // Re-fetch after a delay
+            setTimeout(fetchScheduledTasks, 4000);
+        } catch (error) {
+            console.error("Error deleting scheduled task", error);
+        }
+    };
+
+    const handleRunScheduledTask = async (taskName) => {
+        try {
+            const token = localStorage.getItem('token');
+            const res = await axios.post(`/api/frontend/machines/${id}/tasks`, {
+                task_type: "run_scheduled_task",
+                payload: JSON.stringify({ task_name: taskName }),
+                action_id: generateUUID()
+            }, { headers: { Authorization: `Bearer ${token}` } });
+            setActiveTasks(prev => [...prev, res.data.id]);
+            setActionMessage(`Task to run scheduled task '${taskName}' submitted!`);
+            setTimeout(() => setActionMessage(""), 3000);
+        } catch (error) {
+            console.error("Error running scheduled task", error);
+        }
+    };
+
+    // Use effect to fetch scheduled tasks on tab change
+    useEffect(() => {
+        if (activeTab === 'scheduled_tasks') {
+            fetchScheduledTasks();
+        }
+    }, [activeTab]);
+
+        const handleConfigureKopia = async (e) => {
         e.preventDefault();
         try {
             const pathsArray = kopiaPaths.split(',').map(p => p.trim()).filter(p => p);
@@ -617,7 +729,7 @@ function MachineDetails() {
                 </div>
             </div>
 
-            {/* Scheduled Tasks Tab Placeholder */}
+            {/* Scheduled Tasks Tab */}
             <div className={`${activeTab === 'scheduled_tasks' ? 'block' : 'hidden'}`}>
                 <div className="bg-white p-6 rounded-lg shadow-md border border-gray-200">
                     <div className="flex justify-between items-center mb-4 border-b pb-2">
@@ -625,9 +737,111 @@ function MachineDetails() {
                             <Clock className="text-blue-600 mr-2" size={24} />
                             <h2 className="text-xl font-bold">Scheduled Tasks</h2>
                         </div>
+                        <button
+                            onClick={fetchScheduledTasks}
+                            disabled={activeTasks.length > 0}
+                            className="text-gray-600 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 px-3 py-1 rounded shadow-sm text-sm flex items-center transition-colors disabled:opacity-50"
+                        >
+                            <RefreshCw size={14} className={`mr-1 ${activeTasks.length > 0 ? 'animate-spin block' : ''}`} /> Refresh
+                        </button>
                     </div>
-                    <div className="text-gray-500 py-8 text-center bg-gray-50 rounded border border-dashed border-gray-300">
-                        No tasks scheduled yet.
+
+                    {/* List Tasks */}
+                    <div className="mb-8">
+                        {scheduledTasks.length > 0 ? (
+                            <table className="min-w-full text-left text-sm whitespace-nowrap">
+                                <thead className="uppercase tracking-wider border-b-2 border-gray-200 bg-gray-50">
+                                    <tr>
+                                        <th className="px-4 py-2 font-medium text-gray-500">Task Name</th>
+                                        <th className="px-4 py-2 font-medium text-gray-500">Schedule</th>
+                                        <th className="px-4 py-2 font-medium text-gray-500">Command / Action</th>
+                                        <th className="px-4 py-2 font-medium text-gray-500">Controls</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {scheduledTasks.map((task, idx) => (
+                                        <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
+                                            <td className="px-4 py-2 font-medium text-gray-900">{task.task_name}</td>
+                                            <td className="px-4 py-2 text-gray-600">{task.schedule}</td>
+                                            <td className="px-4 py-2 text-gray-500 font-mono text-xs truncate max-w-xs" title={task.command}>{task.command}</td>
+                                            <td className="px-4 py-2 space-x-2">
+                                                <button
+                                                    onClick={() => handleRunScheduledTask(task.task_name)}
+                                                    disabled={activeTasks.length > 0}
+                                                    className="text-blue-600 hover:text-blue-900 text-xs font-semibold px-2 py-1 border border-blue-200 rounded hover:bg-blue-50 disabled:opacity-50"
+                                                >
+                                                    Run Now
+                                                </button>
+                                                <button
+                                                    onClick={() => handleDeleteScheduledTask(task.task_name)}
+                                                    disabled={activeTasks.length > 0}
+                                                    className="text-red-600 hover:text-red-900 text-xs font-semibold px-2 py-1 border border-red-200 rounded hover:bg-red-50 disabled:opacity-50"
+                                                >
+                                                    Delete
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        ) : (
+                            <div className="text-gray-500 py-8 text-center bg-gray-50 rounded border border-dashed border-gray-300">
+                                No tasks scheduled yet.
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Add Task Form */}
+                    <div className="pt-6 border-t border-gray-200">
+                        <h3 className="text-lg font-semibold text-gray-800 mb-4">Add New Task</h3>
+                        <form onSubmit={handleAddScheduledTask} className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Task Name</label>
+                                <input
+                                    type="text"
+                                    value={newTaskName}
+                                    onChange={(e) => setNewTaskName(e.target.value)}
+                                    placeholder="e.g. DailyCleanup"
+                                    className="w-full px-3 py-2 border rounded-md focus:ring-blue-500 focus:border-blue-500 text-sm disabled:opacity-50"
+                                    required
+                                    disabled={activeTasks.length > 0}
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Schedule <span className="text-xs text-gray-500 font-normal">({machine?.os_name === 'Windows' ? 'e.g. ONCE, DAILY, MINUTE' : 'Cron e.g. 0 0 * * *'})</span>
+                                </label>
+                                <input
+                                    type="text"
+                                    value={newTaskSchedule}
+                                    onChange={(e) => setNewTaskSchedule(e.target.value)}
+                                    placeholder={machine?.os_name === 'Windows' ? 'ONCE' : '0 0 * * *'}
+                                    className="w-full px-3 py-2 border rounded-md focus:ring-blue-500 focus:border-blue-500 text-sm disabled:opacity-50"
+                                    disabled={activeTasks.length > 0}
+                                />
+                            </div>
+                            <div className="md:col-span-2">
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Command / Script</label>
+                                <input
+                                    type="text"
+                                    value={newTaskCommand}
+                                    onChange={(e) => setNewTaskCommand(e.target.value)}
+                                    placeholder="e.g. winget upgrade --all or /usr/bin/apt update"
+                                    className="w-full px-3 py-2 border rounded-md focus:ring-blue-500 focus:border-blue-500 text-sm disabled:opacity-50"
+                                    required
+                                    disabled={activeTasks.length > 0}
+                                />
+                            </div>
+                            <div className="md:col-span-3 flex justify-end">
+                                <button
+                                    type="submit"
+                                    disabled={activeTasks.length > 0}
+                                    className="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center"
+                                >
+                                    <RefreshCw size={16} className={`mr-2 ${activeTasks.length > 0 ? 'animate-spin block' : 'hidden'}`} /> Add Task
+                                </button>
+                            </div>
+                        </form>
                     </div>
                 </div>
             </div>
