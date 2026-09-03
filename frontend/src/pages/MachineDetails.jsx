@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Cpu, HardDrive, Database, RefreshCw, Archive, FolderSearch, Terminal, List, Clock } from 'lucide-react';
+import { ArrowLeft, Cpu, HardDrive, Database, RefreshCw, Archive, FolderSearch, Terminal, List, Clock, ChevronDown, ChevronRight, Folder } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import RemoteFileBrowser from '../components/RemoteFileBrowser';
 import MachineLogsModal from '../components/MachineLogsModal';
@@ -11,7 +11,65 @@ import TextEditorModal from '../components/TextEditorModal';
 import { formatTime, fetchServerTimezone } from '../utils/timezone';
 import { generateUUID } from '../utils/uuid';
 
+
+const TaskFolder = ({ folderName, items, onRun, onDelete, disabled }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    return (
+        <div className="border border-gray-200 mb-2 rounded overflow-hidden">
+            <div
+                className="bg-gray-100 px-4 py-3 flex items-center cursor-pointer hover:bg-gray-200 transition-colors"
+                onClick={() => setIsOpen(!isOpen)}
+            >
+                {isOpen ? <ChevronDown size={18} className="mr-2 text-gray-600" /> : <ChevronRight size={18} className="mr-2 text-gray-600" />}
+                <Folder size={18} className="mr-2 text-blue-500" />
+                <span className="font-semibold text-gray-800 text-sm">{folderName}</span>
+                <span className="ml-auto text-xs font-medium text-gray-500 bg-gray-200 px-2 py-0.5 rounded-full">{items.length} tasks</span>
+            </div>
+            {isOpen && (
+                <div className="bg-white overflow-x-auto">
+                    <table className="min-w-full text-left text-sm whitespace-nowrap">
+                        <thead className="uppercase tracking-wider border-b-2 border-gray-200 bg-gray-50">
+                            <tr>
+                                <th className="px-4 py-2 font-medium text-gray-500 w-1/3">Task Name</th>
+                                <th className="px-4 py-2 font-medium text-gray-500 w-1/4">Schedule</th>
+                                <th className="px-4 py-2 font-medium text-gray-500 w-1/4">Command</th>
+                                <th className="px-4 py-2 font-medium text-gray-500 w-1/6">Controls</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {items.map((task, idx) => (
+                                <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
+                                    <td className="px-4 py-2 font-medium text-gray-900">{task.shortName}</td>
+                                    <td className="px-4 py-2 text-gray-600">{task.schedule}</td>
+                                    <td className="px-4 py-2 text-gray-500 font-mono text-xs truncate max-w-[200px]" title={task.command}>{task.command}</td>
+                                    <td className="px-4 py-2 space-x-2">
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); onRun(task.task_name); }}
+                                            disabled={disabled}
+                                            className="text-blue-600 hover:text-blue-900 text-xs font-semibold px-2 py-1 border border-blue-200 rounded hover:bg-blue-50 disabled:opacity-50"
+                                        >
+                                            Run Now
+                                        </button>
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); onDelete(task.task_name); }}
+                                            disabled={disabled}
+                                            className="text-red-600 hover:text-red-900 text-xs font-semibold px-2 py-1 border border-red-200 rounded hover:bg-red-50 disabled:opacity-50"
+                                        >
+                                            Delete
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+        </div>
+    );
+};
+
 function MachineDetails() {
+
     const { id } = useParams();
     const [machine, setMachine] = useState(null);
     const [updates, setUpdates] = useState([]);
@@ -93,8 +151,21 @@ function MachineDetails() {
             }
             if (completedAny) {
                  setActiveTasks(updatedTasks);
-                 setActionMessage(finalMessage);
-                 setTimeout(() => setActionMessage(""), 5000);
+                 // Don't show raw JSON dumps for list tasks as action messages
+                 if (finalMessage && !finalMessage.startsWith('[') && !finalMessage.includes('FlatLinuxTask')) {
+                     setActionMessage(finalMessage);
+                     setTimeout(() => setActionMessage(""), 5000);
+                 } else if (finalMessage.startsWith('Task completed successfully')) {
+                     // The actual message format is "Task completed successfully: [json array]"
+                     // We should just show a generic success or nothing
+                     if (!finalMessage.includes('[{')) {
+                        setActionMessage(finalMessage);
+                        setTimeout(() => setActionMessage(""), 5000);
+                     } else {
+                        setActionMessage("Tasks refreshed.");
+                        setTimeout(() => setActionMessage(""), 2000);
+                     }
+                 }
             }
         };
 
@@ -748,47 +819,106 @@ function MachineDetails() {
 
                     {/* List Tasks */}
                     <div className="mb-8">
-                        {scheduledTasks.length > 0 ? (
-                            <table className="min-w-full text-left text-sm whitespace-nowrap">
-                                <thead className="uppercase tracking-wider border-b-2 border-gray-200 bg-gray-50">
-                                    <tr>
-                                        <th className="px-4 py-2 font-medium text-gray-500">Task Name</th>
-                                        <th className="px-4 py-2 font-medium text-gray-500">Schedule</th>
-                                        <th className="px-4 py-2 font-medium text-gray-500">Command / Action</th>
-                                        <th className="px-4 py-2 font-medium text-gray-500">Controls</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {scheduledTasks.map((task, idx) => (
-                                        <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
-                                            <td className="px-4 py-2 font-medium text-gray-900">{task.task_name}</td>
-                                            <td className="px-4 py-2 text-gray-600">{task.schedule}</td>
-                                            <td className="px-4 py-2 text-gray-500 font-mono text-xs truncate max-w-xs" title={task.command}>{task.command}</td>
-                                            <td className="px-4 py-2 space-x-2">
-                                                <button
-                                                    onClick={() => handleRunScheduledTask(task.task_name)}
+                        {(() => {
+                            if (scheduledTasks.length === 0) {
+                                return (
+                                    <div className="text-gray-500 py-8 text-center bg-gray-50 rounded border border-dashed border-gray-300">
+                                        No tasks scheduled yet.
+                                    </div>
+                                );
+                            }
+
+                            // Group tasks by folder (everything before the last backslash)
+                            const flatTasks = [];
+                            const folders = {};
+
+                            scheduledTasks.forEach(task => {
+                                const name = task.task_name || "";
+                                // Check if it looks like a Windows path (starts with \ or contains \)
+                                if (name.includes('\\')) {
+                                    const lastSlash = name.lastIndexOf('\\');
+                                    let folderPath = name.substring(0, lastSlash);
+                                    if (folderPath === "") folderPath = "\\"; // Root folder
+                                    const shortName = name.substring(lastSlash + 1);
+
+                                    if (!folders[folderPath]) {
+                                        folders[folderPath] = [];
+                                    }
+                                    folders[folderPath].push({ ...task, shortName });
+                                } else {
+                                    // Linux cron jobs or other flat tasks
+                                    flatTasks.push({ ...task, shortName: name });
+                                }
+                            });
+
+                            // Sort folders alphabetically
+                            const sortedFolderKeys = Object.keys(folders).sort();
+
+                            return (
+                                <div>
+                                    {/* Render flat tasks first (if any) in a standard table */}
+                                    {flatTasks.length > 0 && (
+                                        <div className="mb-6">
+                                            <h3 className="text-sm font-semibold text-gray-700 mb-2 uppercase tracking-wider">General Tasks</h3>
+                                            <div className="border border-gray-200 rounded overflow-hidden">
+                                                <table className="min-w-full text-left text-sm whitespace-nowrap">
+                                                    <thead className="uppercase tracking-wider border-b-2 border-gray-200 bg-gray-50">
+                                                        <tr>
+                                                            <th className="px-4 py-2 font-medium text-gray-500 w-1/3">Task Name</th>
+                                                            <th className="px-4 py-2 font-medium text-gray-500 w-1/4">Schedule</th>
+                                                            <th className="px-4 py-2 font-medium text-gray-500 w-1/4">Command / Action</th>
+                                                            <th className="px-4 py-2 font-medium text-gray-500 w-1/6">Controls</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {flatTasks.map((task, idx) => (
+                                                            <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
+                                                                <td className="px-4 py-2 font-medium text-gray-900">{task.shortName}</td>
+                                                                <td className="px-4 py-2 text-gray-600">{task.schedule}</td>
+                                                                <td className="px-4 py-2 text-gray-500 font-mono text-xs truncate max-w-[200px]" title={task.command}>{task.command}</td>
+                                                                <td className="px-4 py-2 space-x-2">
+                                                                    <button
+                                                                        onClick={() => handleRunScheduledTask(task.task_name)}
+                                                                        disabled={activeTasks.length > 0}
+                                                                        className="text-blue-600 hover:text-blue-900 text-xs font-semibold px-2 py-1 border border-blue-200 rounded hover:bg-blue-50 disabled:opacity-50"
+                                                                    >
+                                                                        Run Now
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={() => handleDeleteScheduledTask(task.task_name)}
+                                                                        disabled={activeTasks.length > 0}
+                                                                        className="text-red-600 hover:text-red-900 text-xs font-semibold px-2 py-1 border border-red-200 rounded hover:bg-red-50 disabled:opacity-50"
+                                                                    >
+                                                                        Delete
+                                                                    </button>
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Render Windows Task Folders */}
+                                    {sortedFolderKeys.length > 0 && (
+                                        <div>
+                                            <h3 className="text-sm font-semibold text-gray-700 mb-2 uppercase tracking-wider">Windows Task Library</h3>
+                                            {sortedFolderKeys.map(folderPath => (
+                                                <TaskFolder
+                                                    key={folderPath}
+                                                    folderName={folderPath}
+                                                    items={folders[folderPath]}
+                                                    onRun={handleRunScheduledTask}
+                                                    onDelete={handleDeleteScheduledTask}
                                                     disabled={activeTasks.length > 0}
-                                                    className="text-blue-600 hover:text-blue-900 text-xs font-semibold px-2 py-1 border border-blue-200 rounded hover:bg-blue-50 disabled:opacity-50"
-                                                >
-                                                    Run Now
-                                                </button>
-                                                <button
-                                                    onClick={() => handleDeleteScheduledTask(task.task_name)}
-                                                    disabled={activeTasks.length > 0}
-                                                    className="text-red-600 hover:text-red-900 text-xs font-semibold px-2 py-1 border border-red-200 rounded hover:bg-red-50 disabled:opacity-50"
-                                                >
-                                                    Delete
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        ) : (
-                            <div className="text-gray-500 py-8 text-center bg-gray-50 rounded border border-dashed border-gray-300">
-                                No tasks scheduled yet.
-                            </div>
-                        )}
+                                                />
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })()}
                     </div>
 
                     {/* Add Task Form */}
