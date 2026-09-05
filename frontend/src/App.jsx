@@ -12,14 +12,32 @@ const PrivateRoute = ({ children }) => {
     return token ? children : <Navigate to="/login" />;
 };
 
+import axios from 'axios';
+import { useState, useEffect } from 'react';
+
 const Navigation = () => {
     const { token, logout } = useAuth();
+    const [systemVersion, setSystemVersion] = useState('');
+
+    useEffect(() => {
+        if (token) {
+            axios.get('/api/frontend/version')
+                .then(res => setSystemVersion(res.data.version))
+                .catch(err => console.error("Error fetching version", err));
+        }
+    }, [token]);
+
     if (!token) return null;
 
     return (
         <nav className="bg-gray-800 text-white p-4 shadow-md">
             <div className="max-w-7xl mx-auto flex justify-between items-center">
-                <div className="text-xl font-bold tracking-wider">HCMS</div>
+                <div className="flex items-center">
+                    <div className="text-xl font-bold tracking-wider">HCMS</div>
+                    {systemVersion && systemVersion !== 'unknown' && (
+                        <span className="ml-3 text-xs text-gray-400 font-mono">v{systemVersion}</span>
+                    )}
+                </div>
                 <div className="flex space-x-6">
                     <Link to="/" className="flex items-center hover:text-blue-300 transition-colors">
                         <Home size={18} className="mr-1"/> Dashboard
