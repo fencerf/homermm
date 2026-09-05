@@ -8,6 +8,7 @@ import MachineLogsModal from '../components/MachineLogsModal';
 import EventLogsModal from '../components/EventLogsModal';
 import KopiaPolicyModal from '../components/KopiaPolicyModal';
 import TextEditorModal from '../components/TextEditorModal';
+import FileManagerModal from '../components/FileManagerModal';
 import { formatTime, fetchServerTimezone } from '../utils/timezone';
 import { generateUUID } from '../utils/uuid';
 
@@ -109,6 +110,7 @@ function MachineDetails() {
     const [scheduleDate, setScheduleDate] = useState("");
     const [actionMessage, setActionMessage] = useState(null);
     const [isBrowserOpen, setIsBrowserOpen] = useState(false);
+    const [isFileManagerOpen, setIsFileManagerOpen] = useState(false);
     const [isLogsOpen, setIsLogsOpen] = useState(false);
     const [isEventLogsOpen, setIsEventLogsOpen] = useState(false);
     const [editingPolicy, setEditingPolicy] = useState(null);
@@ -543,6 +545,12 @@ const fetchScheduledTasks = async () => {
                         <h2 className="text-xl font-bold">System Information</h2>
                         <div className="flex space-x-2">
                             <button
+                                onClick={() => setIsFileManagerOpen(true)}
+                                className="px-3 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 text-xs rounded shadow flex items-center"
+                            >
+                                <FolderSearch size={14} className="mr-1"/> File Manager
+                            </button>
+                            <button
                                 onClick={() => setIsLogsOpen(true)}
                                 className="px-3 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 text-xs rounded shadow flex items-center"
                             >
@@ -553,6 +561,26 @@ const fetchScheduledTasks = async () => {
                                 className="px-3 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 text-xs rounded shadow flex items-center"
                             >
                                 Event Logs
+                            </button>
+                            <button
+                                onClick={async () => {
+                                    try {
+                                        await axios.post(`/api/frontend/machines/${machine.id}/tasks`, {
+                                            task_type: "refresh_system_info",
+                                            payload: "{}",
+                                            action_id: generateUUID()
+                                        });
+                                        setActionMessage({ type: 'success', text: 'Refresh system info command sent.' });
+                                        setTimeout(() => setActionMessage(null), 3000);
+                                        // Refresh the machine data after a short delay
+                                        setTimeout(fetchMachineData, 5000);
+                                    } catch (error) {
+                                        console.error("Failed to send refresh info command", error);
+                                    }
+                                }}
+                                className="px-3 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 text-xs rounded shadow flex items-center"
+                            >
+                                Refresh Info
                             </button>
                             <button
                                 onClick={async () => {
@@ -1098,6 +1126,13 @@ const fetchScheduledTasks = async () => {
                     machineId={machine.id}
                     onClose={() => setIsBrowserOpen(false)}
                     onSelectPath={handleSelectPath}
+                />
+            )}
+
+            {isFileManagerOpen && (
+                <FileManagerModal
+                    machineId={machine.id}
+                    onClose={() => setIsFileManagerOpen(false)}
                 />
             )}
 
