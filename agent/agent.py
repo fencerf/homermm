@@ -506,6 +506,18 @@ def execute_task(task):
                 return "failed", f"Failed to push updates: {e}"
         return "failed", "Agent not fully registered yet."
 
+    elif task_type == "refresh_system_info":
+        logger.info("Received request to refresh system info.")
+        if MACHINE_ID:
+            try:
+                sys_info = get_system_info()
+                resp = requests.post(f"{SERVER_URL}/api/agent/register", json=sys_info, headers=HEADERS)
+                resp.raise_for_status()
+                return "completed", "Successfully refreshed system info."
+            except Exception as e:
+                return "failed", f"Failed to refresh system info: {e}"
+        return "failed", "Agent not fully registered yet."
+
     elif task_type == "update_software":
         package = payload_data.get("package_name")
         if PACKAGE_MANAGER not in PM_COMMANDS:
@@ -1076,6 +1088,40 @@ def interactive_filebrowser_ws():
                         ws.send(json.dumps({"type": "directory_result", "current_path": path, "items": items, "req_id": req.get("req_id")}))
                     except Exception as e:
                          ws.send(json.dumps({"type": "directory_error", "error": str(e), "req_id": req.get("req_id")}))
+
+            elif req.get("type") == "file_download":
+                path = req.get("path")
+                if not path or not os.path.isfile(path):
+                    ws.send(json.dumps({"type": "file_download_error", "error": "Invalid file path", "req_id": req.get("req_id")}))
+                    return
+                try:
+                    import base64
+                    with open(path, "rb") as f:
+                        content = f.read()
+                        b64_content = base64.b64encode(content).decode('utf-8')
+                    ws.send(json.dumps({
+                        "type": "file_download_result",
+                        "content": b64_content,
+                        "filename": os.path.basename(path),
+                        "req_id": req.get("req_id")
+                    }))
+                except Exception as e:
+                    ws.send(json.dumps({"type": "file_download_error", "error": str(e), "req_id": req.get("req_id")}))
+
+            elif req.get("type") == "file_upload":
+                path = req.get("path")
+                content = req.get("content")
+                if not path or content is None:
+                    ws.send(json.dumps({"type": "file_upload_error", "error": "Invalid upload request", "req_id": req.get("req_id")}))
+                    return
+                try:
+                    import base64
+                    b_content = base64.b64decode(content)
+                    with open(path, "wb") as f:
+                        f.write(b_content)
+                    ws.send(json.dumps({"type": "file_upload_result", "success": True, "req_id": req.get("req_id")}))
+                except Exception as e:
+                    ws.send(json.dumps({"type": "file_upload_error", "error": str(e), "req_id": req.get("req_id")}))
         except Exception as e:
             logger.error(f"Error in ws on_message: {e}")
 

@@ -206,6 +206,17 @@ def get_server_timezone(_: str = Depends(verify_admin)):
     tz = os.environ.get("TZ", "UTC")
     return {"timezone": tz}
 
+@router.get("/version")
+def get_system_version(_: str = Depends(verify_admin)):
+    try:
+        # Go up to the root directory where VERSION file is expected
+        version_file = os.path.join(os.path.dirname(__file__), "../../../../VERSION")
+        with open(version_file, "r") as f:
+            return {"version": f.read().strip()}
+    except Exception:
+        pass
+    return {"version": "unknown"}
+
 def get_agent_dir_path():
     # Dev path (host machine) vs Docker path
     dev_path = os.path.join(os.path.dirname(__file__), "../../../../agent")
