@@ -42,13 +42,13 @@ const FileManagerModal = ({ machineId, onClose }) => {
             if (isUnmountedRef.current) return;
             const data = JSON.parse(event.data);
 
-            if (data.type === "directory_list") {
-                setCurrentPath(data.path);
+            if (data.type === "directory_result") {
+                setCurrentPath(data.current_path || "");
                 setItems(data.items);
                 setLoading(false);
                 setError("");
-            } else if (data.type === "error") {
-                setError(data.message);
+            } else if (data.type === "directory_error" || data.type === "error") {
+                setError(data.error || data.message || "Unknown error occurred.");
                 setLoading(false);
             } else if (data.type === "file_download_start") {
                 downloadStateRef.current = {

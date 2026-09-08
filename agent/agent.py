@@ -1240,6 +1240,9 @@ def main_loop():
     except Exception as e:
         logger.error(f"Failed to report initial scheduled tasks: {e}")
 
+    # Flush any startup logs immediately to the server
+    _flush_logs_now()
+
     # Start heartbeat in background
     threading.Thread(target=heartbeat_loop, daemon=True).start()
 
