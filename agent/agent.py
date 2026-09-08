@@ -9,7 +9,7 @@ import os
 import argparse
 import logging
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 import websocket
 import signal
 import sys
@@ -35,7 +35,7 @@ class BufferedServerLogHandler(logging.Handler):
     def emit(self, record):
         try:
             log_entry = {
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "level": record.levelname,
                 "message": self.format(record),
                 "module": record.module,
