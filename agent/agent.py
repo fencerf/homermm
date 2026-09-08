@@ -310,6 +310,16 @@ def get_system_info():
     except Exception as e:
         logger.warning(f"Failed to get detailed network info: {e}")
 
+    # Timezone
+    try:
+        if os_name == "Windows":
+            agent_tz = subprocess.run(["tzutil", "/g"], capture_output=True, text=True).stdout.strip()
+        else:
+            agent_tz = subprocess.run(["date", "+%Z"], capture_output=True, text=True).stdout.strip()
+    except Exception:
+        import time
+        agent_tz = time.tzname[time.localtime().tm_isdst > 0]
+
     return {
         "hostname": hostname,
         "os_name": os_name,
@@ -323,7 +333,8 @@ def get_system_info():
         "network_info": json.dumps(network_info) if network_info else None,
         "agent_version": AGENT_VERSION,
         "boot_time": boot_time,
-        "reboot_pending": reboot_pending
+        "reboot_pending": reboot_pending,
+        "timezone": agent_tz
     }
 
 def get_available_updates():

@@ -16,6 +16,7 @@ class MachineBase(BaseModel):
     agent_version: Optional[str] = None
     boot_time: Optional[int] = None
     reboot_pending: Optional[bool] = False
+    timezone: Optional[str] = None
 
 class MachineCreate(MachineBase):
     pass

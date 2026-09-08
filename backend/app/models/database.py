@@ -23,6 +23,7 @@ class Machine(Base):
     agent_version = Column(String, nullable=True)
     boot_time = Column(Integer, nullable=True) # Unix timestamp of boot time
     reboot_pending = Column(Boolean, default=False)
+    timezone = Column(String, nullable=True)
 
     updates = relationship("PendingUpdate", back_populates="machine", cascade="all, delete-orphan")
     tasks = relationship("AgentTask", back_populates="machine", cascade="all, delete-orphan")

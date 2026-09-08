@@ -630,6 +630,7 @@ const fetchScheduledTasks = async () => {
                                 <p className="text-sm text-gray-500 font-semibold uppercase tracking-wider">Hostname / OS</p>
                                 <p className="text-lg font-medium">{machine.hostname}</p>
                                 <p className="text-sm text-gray-600">{machine.os_name} {machine.os_version}</p>
+                                {machine.timezone && <p className="text-sm text-gray-500 mt-1">Timezone: {machine.timezone}</p>}
                             </div>
                             <div className="text-right">
                                 <p className="text-sm text-gray-500 font-semibold uppercase tracking-wider">Agent Version</p>

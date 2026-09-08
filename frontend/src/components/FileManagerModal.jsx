@@ -38,7 +38,7 @@ const FileManagerModal = ({ machineId, onClose }) => {
             });
         };
 
-        wsRef.current.onmessage = (event) => {
+        wsRef.current.onmessage = async (event) => {
             if (isUnmountedRef.current) return;
             const data = JSON.parse(event.data);
 
@@ -53,37 +53,35 @@ const FileManagerModal = ({ machineId, onClose }) => {
             } else if (data.type === "file_download_start") {
                 downloadStateRef.current = {
                     active: true,
-                    chunks: [],
+                    chunks: [], // We will store Blob objects here to avoid OOM
                     totalChunks: data.total_chunks,
                     filename: data.filename
                 };
                 setProgress(`Downloading: 0%`);
+
+                // Handle 0 byte files immediately
+                if (data.total_chunks === 0) {
+                    const blob = new Blob([]);
+                    triggerDownload(blob, data.filename);
+                }
+
             } else if (data.type === "file_download_chunk") {
                 if (downloadStateRef.current.active) {
-                    downloadStateRef.current.chunks.push(data.content); // Base64 string
+                    // Convert base64 to binary and store as Blob immediately to save memory
+                    const binary = atob(data.content);
+                    const array = new Uint8Array(binary.length);
+                    for (let i = 0; i < binary.length; i++) {
+                        array[i] = binary.charCodeAt(i);
+                    }
+                    downloadStateRef.current.chunks.push(new Blob([array]));
 
                     const p = Math.round((downloadStateRef.current.chunks.length / downloadStateRef.current.totalChunks) * 100);
                     setProgress(`Downloading: ${p}%`);
 
                     if (downloadStateRef.current.chunks.length === downloadStateRef.current.totalChunks) {
-                        // Complete
-                        const fullBase64 = downloadStateRef.current.chunks.join('');
-                        const binary = atob(fullBase64);
-                        const array = new Uint8Array(binary.length);
-                        for (let i = 0; i < binary.length; i++) {
-                            array[i] = binary.charCodeAt(i);
-                        }
-                        const blob = new Blob([array]);
-                        const link = document.createElement('a');
-                        link.href = URL.createObjectURL(blob);
-                        link.download = downloadStateRef.current.filename;
-                        document.body.appendChild(link);
-                        link.click();
-                        document.body.removeChild(link);
-
-                        setLoading(false);
-                        setProgress(null);
-                        downloadStateRef.current.active = false;
+                        // Combine all chunks into final Blob
+                        const finalBlob = new Blob(downloadStateRef.current.chunks);
+                        triggerDownload(finalBlob, downloadStateRef.current.filename);
                     }
                 }
             } else if (data.type === "file_download_error") {
@@ -113,6 +111,21 @@ const FileManagerModal = ({ machineId, onClose }) => {
                 reconnectTimeoutRef.current = setTimeout(connectWebSocket, 5000);
             }
         };
+    };
+
+    const triggerDownload = (blob, filename) => {
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        setLoading(false);
+        setProgress(null);
+        downloadStateRef.current.active = false;
+        // Clean up memory
+        downloadStateRef.current.chunks = [];
     };
 
     const loadDirectory = (path) => {
@@ -186,6 +199,22 @@ const FileManagerModal = ({ machineId, onClose }) => {
         const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
 
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            // Handle 0 byte file
+            if (file.size === 0) {
+                wsRef.current.send(JSON.stringify({
+                    type: "file_upload_start",
+                    path: targetPath,
+                    total_chunks: 0,
+                    req_id: Date.now().toString()
+                }));
+                wsRef.current.send(JSON.stringify({
+                    type: "file_upload_finish",
+                    path: targetPath,
+                    req_id: Date.now().toString()
+                }));
+                return;
+            }
+
             wsRef.current.send(JSON.stringify({
                 type: "file_upload_start",
                 path: targetPath,

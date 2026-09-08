@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, Navigate } from 'react-router-dom';
+import axios from 'axios';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -11,9 +12,6 @@ const PrivateRoute = ({ children }) => {
     const { token } = useAuth();
     return token ? children : <Navigate to="/login" />;
 };
-
-import axios from 'axios';
-import { useState, useEffect } from 'react';
 
 const Navigation = () => {
     const { token, logout } = useAuth();
