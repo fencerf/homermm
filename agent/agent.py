@@ -1096,32 +1096,62 @@ def interactive_filebrowser_ws():
                     return
                 try:
                     import base64
-                    with open(path, "rb") as f:
-                        content = f.read()
-                        b64_content = base64.b64encode(content).decode('utf-8')
+                    import math
+                    file_size = os.path.getsize(path)
+                    chunk_size = 1024 * 1024  # 1MB
+                    total_chunks = math.ceil(file_size / chunk_size)
+
                     ws.send(json.dumps({
-                        "type": "file_download_result",
-                        "content": b64_content,
+                        "type": "file_download_start",
                         "filename": os.path.basename(path),
+                        "total_chunks": total_chunks,
                         "req_id": req.get("req_id")
                     }))
+
+                    with open(path, "rb") as f:
+                        chunk_index = 0
+                        while True:
+                            chunk = f.read(chunk_size)
+                            if not chunk:
+                                break
+                            b64_content = base64.b64encode(chunk).decode('utf-8')
+                            ws.send(json.dumps({
+                                "type": "file_download_chunk",
+                                "chunk_index": chunk_index,
+                                "content": b64_content,
+                                "req_id": req.get("req_id")
+                            }))
+                            chunk_index += 1
+
                 except Exception as e:
                     ws.send(json.dumps({"type": "file_download_error", "error": str(e), "req_id": req.get("req_id")}))
 
-            elif req.get("type") == "file_upload":
+            elif req.get("type") == "file_upload_start":
+                path = req.get("path")
+                if not path:
+                    ws.send(json.dumps({"type": "file_upload_error", "error": "Invalid path", "req_id": req.get("req_id")}))
+                    return
+                try:
+                    # Create empty file or truncate existing
+                    with open(path, "wb") as f:
+                        pass
+                except Exception as e:
+                    ws.send(json.dumps({"type": "file_upload_error", "error": str(e), "req_id": req.get("req_id")}))
+
+            elif req.get("type") == "file_upload_chunk":
                 path = req.get("path")
                 content = req.get("content")
-                if not path or content is None:
-                    ws.send(json.dumps({"type": "file_upload_error", "error": "Invalid upload request", "req_id": req.get("req_id")}))
-                    return
                 try:
                     import base64
                     b_content = base64.b64decode(content)
-                    with open(path, "wb") as f:
+                    with open(path, "ab") as f:
                         f.write(b_content)
-                    ws.send(json.dumps({"type": "file_upload_result", "success": True, "req_id": req.get("req_id")}))
                 except Exception as e:
                     ws.send(json.dumps({"type": "file_upload_error", "error": str(e), "req_id": req.get("req_id")}))
+
+            elif req.get("type") == "file_upload_finish":
+                path = req.get("path")
+                ws.send(json.dumps({"type": "file_upload_result", "success": True, "req_id": req.get("req_id")}))
         except Exception as e:
             logger.error(f"Error in ws on_message: {e}")
 

@@ -8,17 +8,18 @@ const FileManagerModal = ({ machineId, onClose }) => {
     const [loading, setLoading] = useState(false);
     const [connecting, setConnecting] = useState(true);
     const [error, setError] = useState("");
-    const pollIntervalRef = useRef(null);
+    const [progress, setProgress] = useState(null); // For tracking chunk progress
 
     const wsRef = useRef(null);
     const reconnectTimeoutRef = useRef(null);
     const isUnmountedRef = useRef(false);
 
+    // State for chunked download
+    const downloadStateRef = useRef({ active: false, chunks: [], totalChunks: 0, filename: '' });
+
     const connectWebSocket = () => {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        // Need absolute URL since proxy doesn't handle wss normally for non-vite paths easily
-        // Assuming development vs production
-        const host = import.meta.env.DEV ? window.location.host : window.location.host;
+        const host = window.location.host;
         const token = localStorage.getItem('token');
         const wsUrl = `${protocol}//${host}/api/frontend/machines/${machineId}/ws?token=${token}`;
 
@@ -26,13 +27,10 @@ const FileManagerModal = ({ machineId, onClose }) => {
 
         wsRef.current.onopen = () => {
             console.log("WebSocket connected");
-            // First time, start agent ws loop if not already running via task,
-            // then request root directory
             axios.post(`/api/frontend/machines/${machineId}/tasks`, {
                 task_type: "start_filebrowser_ws",
                 payload: "{}"
             }).then(() => {
-                 // Wait for agent to connect (it polls every 5s)
                  setTimeout(() => {
                      setConnecting(false);
                      loadDirectory("");
@@ -41,38 +39,66 @@ const FileManagerModal = ({ machineId, onClose }) => {
         };
 
         wsRef.current.onmessage = (event) => {
+            if (isUnmountedRef.current) return;
             const data = JSON.parse(event.data);
-            if (data.type === "directory_result") {
-                setCurrentPath(data.current_path || "");
+
+            if (data.type === "directory_list") {
+                setCurrentPath(data.path);
                 setItems(data.items);
                 setLoading(false);
-            } else if (data.type === "directory_error" || data.type === "error") {
-                setError(`Error: ${data.error}`);
+                setError("");
+            } else if (data.type === "error") {
+                setError(data.message);
                 setLoading(false);
-            } else if (data.type === "file_download_result") {
-                const byteCharacters = atob(data.content);
-                const byteNumbers = new Array(byteCharacters.length);
-                for (let i = 0; i < byteCharacters.length; i++) {
-                    byteNumbers[i] = byteCharacters.charCodeAt(i);
+            } else if (data.type === "file_download_start") {
+                downloadStateRef.current = {
+                    active: true,
+                    chunks: [],
+                    totalChunks: data.total_chunks,
+                    filename: data.filename
+                };
+                setProgress(`Downloading: 0%`);
+            } else if (data.type === "file_download_chunk") {
+                if (downloadStateRef.current.active) {
+                    downloadStateRef.current.chunks.push(data.content); // Base64 string
+
+                    const p = Math.round((downloadStateRef.current.chunks.length / downloadStateRef.current.totalChunks) * 100);
+                    setProgress(`Downloading: ${p}%`);
+
+                    if (downloadStateRef.current.chunks.length === downloadStateRef.current.totalChunks) {
+                        // Complete
+                        const fullBase64 = downloadStateRef.current.chunks.join('');
+                        const binary = atob(fullBase64);
+                        const array = new Uint8Array(binary.length);
+                        for (let i = 0; i < binary.length; i++) {
+                            array[i] = binary.charCodeAt(i);
+                        }
+                        const blob = new Blob([array]);
+                        const link = document.createElement('a');
+                        link.href = URL.createObjectURL(blob);
+                        link.download = downloadStateRef.current.filename;
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+
+                        setLoading(false);
+                        setProgress(null);
+                        downloadStateRef.current.active = false;
+                    }
                 }
-                const byteArray = new Uint8Array(byteNumbers);
-                const blob = new Blob([byteArray]);
-                const link = document.createElement('a');
-                link.href = window.URL.createObjectURL(blob);
-                link.download = data.filename;
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-                setLoading(false);
             } else if (data.type === "file_download_error") {
                 setError(`Download failed: ${data.error}`);
                 setLoading(false);
+                setProgress(null);
+                downloadStateRef.current.active = false;
             } else if (data.type === "file_upload_result") {
                 setLoading(false);
+                setProgress(null);
                 loadDirectory(currentPath); // Refresh
             } else if (data.type === "file_upload_error") {
                 setError(`Upload failed: ${data.error}`);
                 setLoading(false);
+                setProgress(null);
             }
         };
 
@@ -115,16 +141,13 @@ const FileManagerModal = ({ machineId, onClose }) => {
 
     const navigateUp = () => {
         if (!currentPath) return;
-        // Basic up navigation (handles both Linux / and Windows C:\)
         let parentPath = currentPath.replace(/\\/g, '/');
         if (parentPath.endsWith('/')) parentPath = parentPath.slice(0, -1);
 
         const lastSlash = parentPath.lastIndexOf('/');
         if (lastSlash === -1 || (lastSlash === 0 && currentPath.length === 1)) {
-             // We are at root, or going to root
              navigateTo("");
         } else {
-             // For Windows root like C:, slice doesn't work perfectly if we strip the slash, so we add it back if needed
              let up = currentPath.slice(0, lastSlash);
              if (up.endsWith(':')) up += '\\';
              if (up === "") up = "/";
@@ -151,34 +174,70 @@ const FileManagerModal = ({ machineId, onClose }) => {
         setLoading(true);
         setError("");
 
-        const reader = new FileReader();
-        reader.onload = (event) => {
-            const arrayBuffer = event.target.result;
-            // Convert ArrayBuffer to base64
-            const uint8Array = new Uint8Array(arrayBuffer);
-            let binary = '';
-            for (let i = 0; i < uint8Array.byteLength; i++) {
-                binary += String.fromCharCode(uint8Array[i]);
-            }
-            const base64Content = btoa(binary);
+        const separator = currentPath.includes('\\') || currentPath.endsWith(':') ? '\\' : '/';
+        let targetPath = currentPath;
+        if (!targetPath.endsWith(separator) && targetPath !== "") {
+            targetPath += separator;
+        }
+        targetPath += file.name;
 
-            const separator = currentPath.includes('\\') || currentPath.endsWith(':') ? '\\' : '/';
-            let targetPath = currentPath;
-            if (!targetPath.endsWith(separator) && targetPath !== "") {
-                targetPath += separator;
-            }
-            targetPath += file.name;
+        // Chunking upload
+        const CHUNK_SIZE = 1024 * 1024; // 1MB chunks
+        const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
 
-            if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-                wsRef.current.send(JSON.stringify({
-                    type: "file_upload",
-                    path: targetPath,
-                    content: base64Content,
-                    req_id: Date.now().toString()
-                }));
-            }
-        };
-        reader.readAsArrayBuffer(file);
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({
+                type: "file_upload_start",
+                path: targetPath,
+                total_chunks: totalChunks,
+                req_id: Date.now().toString()
+            }));
+
+            let chunkIndex = 0;
+
+            const readNextChunk = () => {
+                const start = chunkIndex * CHUNK_SIZE;
+                const end = Math.min(start + CHUNK_SIZE, file.size);
+                const blob = file.slice(start, end);
+
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    const arrayBuffer = event.target.result;
+                    const uint8Array = new Uint8Array(arrayBuffer);
+                    let binary = '';
+                    for (let i = 0; i < uint8Array.byteLength; i++) {
+                        binary += String.fromCharCode(uint8Array[i]);
+                    }
+                    const base64Content = btoa(binary);
+
+                    wsRef.current.send(JSON.stringify({
+                        type: "file_upload_chunk",
+                        path: targetPath,
+                        chunk_index: chunkIndex,
+                        content: base64Content,
+                        req_id: Date.now().toString()
+                    }));
+
+                    chunkIndex++;
+                    const p = Math.round((chunkIndex / totalChunks) * 100);
+                    setProgress(`Uploading: ${p}%`);
+
+                    if (chunkIndex < totalChunks) {
+                        // Short delay to avoid overwhelming the websocket
+                        setTimeout(readNextChunk, 50);
+                    } else {
+                        wsRef.current.send(JSON.stringify({
+                            type: "file_upload_finish",
+                            path: targetPath,
+                            req_id: Date.now().toString()
+                        }));
+                    }
+                };
+                reader.readAsArrayBuffer(blob);
+            };
+
+            readNextChunk();
+        }
     };
 
     return (
@@ -198,10 +257,10 @@ const FileManagerModal = ({ machineId, onClose }) => {
                     <button onClick={() => navigateTo("")} className="p-1 hover:bg-gray-200 rounded text-gray-600" title="Go to Root">
                         <Home size={18} />
                     </button>
-                    <button onClick={navigateUp} disabled={!currentPath} className="p-1 hover:bg-gray-200 rounded text-gray-600 disabled:opacity-50" title="Up one level">
+                    <button onClick={navigateUp} disabled={!currentPath || loading} className="p-1 hover:bg-gray-200 rounded text-gray-600 disabled:opacity-50" title="Up one level">
                         <ChevronRight size={18} className="transform rotate-180" />
                     </button>
-                    <button onClick={() => navigateTo(currentPath)} className="p-1 hover:bg-gray-200 rounded text-gray-600" title="Refresh">
+                    <button onClick={() => navigateTo(currentPath)} disabled={loading} className="p-1 hover:bg-gray-200 rounded text-gray-600 disabled:opacity-50" title="Refresh">
                         <RotateCcw size={16} />
                     </button>
 
@@ -220,6 +279,13 @@ const FileManagerModal = ({ machineId, onClose }) => {
                     </button>
                 </div>
 
+                {/* Progress Bar */}
+                {progress && (
+                    <div className="px-4 py-2 bg-blue-50 text-blue-700 text-sm font-medium border-b border-blue-100 flex items-center justify-center">
+                        <RotateCcw className="animate-spin mr-2" size={16} /> {progress}
+                    </div>
+                )}
+
                 {/* Content */}
                 <div className="flex-grow overflow-auto p-2">
                     {connecting ? (
@@ -228,7 +294,7 @@ const FileManagerModal = ({ machineId, onClose }) => {
                             <p className="font-semibold text-gray-700">Waking up remote agent...</p>
                             <p className="text-xs text-gray-400 mt-2 text-center max-w-sm">This may take up to 10 seconds while the agent establishes a secure interactive tunnel.</p>
                         </div>
-                    ) : loading ? (
+                    ) : (loading && !progress) ? (
                         <div className="flex justify-center items-center h-32 text-gray-500">
                             <RotateCcw className="animate-spin mr-2" size={20} /> Loading directory...
                         </div>
@@ -244,8 +310,9 @@ const FileManagerModal = ({ machineId, onClose }) => {
                                 <li key={idx}>
                                     <div className="flex items-center w-full px-3 py-2 hover:bg-gray-100 rounded">
                                         <button
+                                            disabled={loading}
                                             onClick={() => item.is_dir && navigateTo(item.path)}
-                                            className={`flex items-center flex-grow text-left ${!item.is_dir ? 'cursor-default opacity-70' : ''}`}
+                                            className={`flex items-center flex-grow text-left ${!item.is_dir || loading ? 'cursor-default opacity-70' : ''}`}
                                         >
                                             {item.is_dir ? (
                                                 <Folder size={18} className="text-blue-400 mr-3" />
@@ -256,8 +323,9 @@ const FileManagerModal = ({ machineId, onClose }) => {
                                         </button>
                                         {!item.is_dir && (
                                             <button
+                                                disabled={loading}
                                                 onClick={() => handleDownload(item.path)}
-                                                className="p-1 text-gray-500 hover:text-blue-600 rounded"
+                                                className="p-1 text-gray-500 hover:text-blue-600 rounded disabled:opacity-50 disabled:cursor-not-allowed"
                                                 title="Download file"
                                             >
                                                 <Download size={16} />
@@ -275,4 +343,4 @@ const FileManagerModal = ({ machineId, onClose }) => {
     );
 };
 
-export default RemoteFileBrowser;
+export default FileManagerModal;
