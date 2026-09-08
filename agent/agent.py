@@ -266,7 +266,7 @@ def get_system_info():
 
     # Uptime / Boot time
     try:
-        boot_time = psutil.boot_time()
+        boot_time = int(psutil.boot_time())
     except Exception:
         boot_time = None
 
