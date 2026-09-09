@@ -11,11 +11,12 @@ import pika
 logger = logging.getLogger(__name__)
 
 class BaseListener:
-    def __init__(self, server_url, headers, machine_id, execute_task_cb):
+    def __init__(self, server_url, headers, machine_id, execute_task_cb, verify_ssl=True):
         self.server_url = server_url
         self.headers = headers
         self.machine_id = machine_id
         self.execute_task_cb = execute_task_cb
+        self.verify_ssl = verify_ssl
         self.running = True
 
     def start(self):
@@ -33,7 +34,8 @@ class BaseListener:
             requests.post(
                 f"{self.server_url}/api/agent/{self.machine_id}/tasks/{task['id']}/result",
                 json={"status": status, "result_message": msg},
-                headers=self.headers
+                headers=self.headers,
+                verify=self.verify_ssl
             )
         except Exception as e:
             logger.error(f"Failed to post task result: {e}")
@@ -43,7 +45,7 @@ class StandardPollingListener(BaseListener):
     def start(self):
         while self.running:
             try:
-                resp = requests.get(f"{self.server_url}/api/agent/{self.machine_id}/tasks", headers=self.headers)
+                resp = requests.get(f"{self.server_url}/api/agent/{self.machine_id}/tasks", headers=self.headers, verify=self.verify_ssl)
                 tasks = resp.json()
                 for task in tasks:
                     self._handle_task(task)
@@ -55,7 +57,7 @@ class LongPollingListener(BaseListener):
     def start(self):
         while self.running:
             try:
-                resp = requests.get(f"{self.server_url}/api/agent/{self.machine_id}/tasks?timeout=30", headers=self.headers, timeout=35)
+                resp = requests.get(f"{self.server_url}/api/agent/{self.machine_id}/tasks?timeout=30", headers=self.headers, timeout=35, verify=self.verify_ssl)
                 tasks = resp.json()
                 for task in tasks:
                     self._handle_task(task)
@@ -69,7 +71,7 @@ class SSEListener(BaseListener):
     def start(self):
         # We still do an initial poll to catch up on any missed events while starting
         try:
-            resp = requests.get(f"{self.server_url}/api/agent/{self.machine_id}/tasks", headers=self.headers)
+            resp = requests.get(f"{self.server_url}/api/agent/{self.machine_id}/tasks", headers=self.headers, verify=self.verify_ssl)
             tasks = resp.json()
             for task in tasks:
                 self._handle_task(task)
@@ -78,7 +80,7 @@ class SSEListener(BaseListener):
 
         while self.running:
             try:
-                response = requests.get(f"{self.server_url}/api/agent/{self.machine_id}/tasks/stream", stream=True, headers=self.headers)
+                response = requests.get(f"{self.server_url}/api/agent/{self.machine_id}/tasks/stream", stream=True, headers=self.headers, verify=self.verify_ssl)
                 client = sseclient.SSEClient(response)
                 for event in client.events():
                     if not self.running:

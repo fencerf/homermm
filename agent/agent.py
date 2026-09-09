@@ -85,10 +85,12 @@ parser = argparse.ArgumentParser(description="HCMS Client Agent")
 parser.add_argument("-s", "--server", type=str, help="Address of the HCMS server (e.g. http://192.168.1.100:8000)")
 parser.add_argument("--log-level", type=str, help="Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)")
 parser.add_argument("--log-file", type=str, help="Path to log file")
+parser.add_argument("--insecure", action="store_true", help="Disable SSL certificate verification")
 args, unknown_args = parser.parse_known_args()
 
 # Configuration hierarchy: Args > Config File > Environment > Default
-SERVER_URL = args.server or file_config.get("server") or os.environ.get("SERVER_URL", "http://127.0.0.1:8000")
+SERVER_URL = args.server or file_config.get("server") or os.environ.get("SERVER_URL", "https://127.0.0.1:8000")
+VERIFY_SSL = not args.insecure if args.insecure else file_config.get("verify_ssl", True)
 AGENT_API_KEY = file_config.get("api_key") or os.environ.get("AGENT_API_KEY", "dummy_agent_key_123")
 HEADERS = {"x-agent-key": AGENT_API_KEY}
 MACHINE_ID = None
@@ -185,7 +187,8 @@ def _flush_logs_now():
             f"{SERVER_URL}/api/agent/{MACHINE_ID}/logs",
             json={"logs": batch},
             headers=HEADERS,
-            timeout=5
+            timeout=5,
+            verify=VERIFY_SSL
         )
         if response.status_code != 200:
             # If failed, push back to buffer
@@ -523,7 +526,7 @@ def execute_task(task):
             updates = get_available_updates()
             update_headers()
             try:
-                requests.post(f"{SERVER_URL}/api/agent/{MACHINE_ID}/updates", json=updates, headers=HEADERS)
+                requests.post(f"{SERVER_URL}/api/agent/{MACHINE_ID}/updates", json=updates, headers=HEADERS, verify=VERIFY_SSL)
                 return "completed", "Successfully checked and pushed latest updates to server."
             except Exception as e:
                 return "failed", f"Failed to push updates: {e}"
@@ -534,7 +537,7 @@ def execute_task(task):
         if MACHINE_ID:
             try:
                 sys_info = get_system_info()
-                resp = requests.post(f"{SERVER_URL}/api/agent/register", json=sys_info, headers=HEADERS)
+                resp = requests.post(f"{SERVER_URL}/api/agent/register", json=sys_info, headers=HEADERS, verify=VERIFY_SSL)
                 resp.raise_for_status()
                 return "completed", "Successfully refreshed system info."
             except Exception as e:
@@ -1196,7 +1199,11 @@ def interactive_filebrowser_ws():
                               on_error=on_error,
                               on_close=on_close)
 
-    ws.run_forever()
+    if not VERIFY_SSL:
+        import ssl
+        ws.run_forever(sslopt={"cert_reqs": ssl.CERT_NONE})
+    else:
+        ws.run_forever()
 
 def handle_exit_signal(signum, frame):
     logger.info(f"Received signal {signum}. Gracefully shutting down...")
@@ -1209,7 +1216,7 @@ def heartbeat_loop():
         try:
             update_headers()
             sys_info = get_system_info()
-            resp = requests.post(f"{SERVER_URL}/api/agent/register", json=sys_info, headers=HEADERS)
+            resp = requests.post(f"{SERVER_URL}/api/agent/register", json=sys_info, headers=HEADERS, verify=VERIFY_SSL)
             resp.raise_for_status()
             machine_data = resp.json()
             MACHINE_ID = machine_data["id"]
@@ -1246,7 +1253,7 @@ def main_loop():
     while MACHINE_ID is None:
         try:
             sys_info = get_system_info()
-            resp = requests.post(f"{SERVER_URL}/api/agent/enroll", json=sys_info)
+            resp = requests.post(f"{SERVER_URL}/api/agent/enroll", json=sys_info, verify=VERIFY_SSL)
             resp.raise_for_status()
             machine_data = resp.json()
             if machine_data.get("approval_status") == "approved":
@@ -1271,7 +1278,8 @@ def main_loop():
         task_res = requests.post(
             f"{SERVER_URL}/api/agent/{MACHINE_ID}/scheduled-tasks/sync",
             json={"result_message": tasks_json},
-            headers=HEADERS
+            headers=HEADERS,
+            verify=VERIFY_SSL
         )
         if task_res.status_code == 200:
             logger.info("Successfully reported initial scheduled tasks to server.")

@@ -8,6 +8,12 @@ import { fetchServerTimezone, formatTime } from '../utils/timezone';
 const getFingerprint = async (pubKey) => {
     if (!pubKey) return "UNKNOWN";
     const cleanKey = pubKey.replace("-----BEGIN PUBLIC KEY-----", "").replace("-----END PUBLIC KEY-----", "").replace(/\n/g, "").trim();
+
+    // Fallback for non-secure contexts (e.g., HTTP without localhost) where crypto.subtle is undefined
+    if (!window.crypto || !window.crypto.subtle) {
+        return "INSECURE_ENV";
+    }
+
     const msgUint8 = new TextEncoder().encode(cleanKey);
     const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
     const hashArray = Array.from(new Uint8Array(hashBuffer));
