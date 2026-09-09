@@ -73,9 +73,17 @@ def enroll_machine(machine: schemas.MachineCreate, db: Session = Depends(get_db)
 
     db_machine = db.query(models.Machine).filter(models.Machine.hostname == machine.hostname).first()
     if db_machine:
+        # If the machine is already approved, don't allow modifying the public key via unauthenticated /enroll
+        if db_machine.approval_status == "approved" and machine.public_key != db_machine.public_key:
+            raise HTTPException(status_code=403, detail="Machine already enrolled and approved")
+
         for var, value in vars(machine).items():
-            if var != "approval_status" or getattr(db_machine, var) != "approved":
+            if var != "approval_status":
                 setattr(db_machine, var, value)
+        # If the machine was rejected, keep it rejected unless the admin changes it via UI, do not flip back to pending
+        # Actually, in the plan step 2, "Prevent overwriting approval_status to 'pending' if the machine is already 'rejected'."
+        # The loop above overwrites it if it's not "approval_status".
+
         db_machine.last_seen = datetime.utcnow()
         db_machine.is_online = True
     else:

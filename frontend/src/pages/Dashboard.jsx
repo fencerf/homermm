@@ -145,11 +145,11 @@ const fetchAll = async () => {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {machines.map(machine => (
                     <Link to={`/machine/${machine.id}`} key={machine.id} className="block hover:shadow-xl transition-shadow duration-200">
-                        <div className="bg-white rounded-lg p-6 shadow-md border border-gray-200">
+                        <div className={`bg-white rounded-lg p-6 shadow-md border border-gray-200 ${!machine.is_online ? 'opacity-60 grayscale' : ''}`}>
                             <div className="flex items-center justify-between mb-4">
                                 <div className="flex items-center space-x-3">
-                                    <Monitor className="text-blue-500" size={24} />
-                                    <h2 className="text-xl font-semibold text-gray-800">{machine.hostname}</h2>
+                                    <Monitor className={`text-blue-500 ${!machine.is_online ? 'text-gray-400' : ''}`} size={24} />
+                                    <h2 className={`text-xl font-semibold ${!machine.is_online ? 'text-gray-500' : 'text-gray-800'}`}>{machine.hostname}</h2>
                                 </div>
                                 <div className="flex items-center space-x-3">
                                     {machine.pending_os_updates > 0 && (
