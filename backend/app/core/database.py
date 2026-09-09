@@ -18,6 +18,75 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 def init_db():
     Base.metadata.create_all(bind=engine)
 
+    # Graceful migration for existing databases
+    with engine.connect() as conn:
+        try:
+            conn.execute(text("ALTER TABLE machines ADD COLUMN disk_used INTEGER DEFAULT 0"))
+        except Exception:
+            pass # Column likely exists
+
+        try:
+            conn.execute(text("ALTER TABLE machines ADD COLUMN kopia_config TEXT"))
+        except Exception:
+            pass
+
+        try:
+            conn.execute(text("ALTER TABLE pending_updates ADD COLUMN update_type VARCHAR DEFAULT 'software'"))
+        except Exception:
+            pass
+
+        try:
+            conn.execute(text("ALTER TABLE pending_updates ADD COLUMN description TEXT"))
+        except Exception:
+            pass
+
+        try:
+            conn.execute(text("ALTER TABLE agent_tasks ADD COLUMN scheduled_for DATETIME"))
+        except Exception:
+            pass
+
+        try:
+            conn.execute(text("ALTER TABLE machines ADD COLUMN network_info TEXT"))
+        except Exception:
+            pass
+
+        try:
+            conn.execute(text("ALTER TABLE machines ADD COLUMN agent_version VARCHAR"))
+        except Exception:
+            pass
+
+        try:
+            conn.execute(text("ALTER TABLE machines ADD COLUMN boot_time INTEGER"))
+        except Exception:
+            pass
+
+        try:
+            conn.execute(text("ALTER TABLE machines ADD COLUMN reboot_pending BOOLEAN DEFAULT 0"))
+        except Exception:
+            pass
+
+        try:
+            conn.execute(text("ALTER TABLE agent_tasks ADD COLUMN action_id VARCHAR"))
+        except Exception:
+            pass
+
+        try:
+            conn.execute(text("ALTER TABLE machines ADD COLUMN timezone VARCHAR"))
+        except Exception:
+            pass
+
+        try:
+            conn.execute(text("ALTER TABLE machines ADD COLUMN public_key TEXT"))
+        except Exception:
+            pass
+
+        try:
+            conn.execute(text("ALTER TABLE machines ADD COLUMN approval_status VARCHAR DEFAULT 'pending'"))
+        except Exception:
+            pass
+
+        conn.commit()
+
 
 def get_db():
     db = SessionLocal()
