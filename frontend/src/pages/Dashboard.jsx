@@ -4,25 +4,68 @@ import { Link } from 'react-router-dom';
 import { Server, Monitor, Clock, AlertTriangle, Download } from 'lucide-react';
 import { fetchServerTimezone, formatTime } from '../utils/timezone';
 
+
+const getFingerprint = async (pubKey) => {
+    if (!pubKey) return "UNKNOWN";
+    const cleanKey = pubKey.replace("-----BEGIN PUBLIC KEY-----", "").replace("-----END PUBLIC KEY-----", "").replace(/\n/g, "").trim();
+    const msgUint8 = new TextEncoder().encode(cleanKey);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+    return hashHex.substring(0, 6);
+};
+
 function Dashboard() {
     const [machines, setMachines] = useState([]);
+    const [pendingMachines, setPendingMachines] = useState([]);
+    const [fingerprints, setFingerprints] = useState({});
+    const [approving, setApproving] = useState({});
 
     useEffect(() => {
         fetchServerTimezone(); // pre-fetch timezone on dashboard load
 
-        const fetchMachines = async () => {
+const fetchAll = async () => {
             try {
                 const response = await axios.get('/api/frontend/machines');
                 setMachines(response.data);
             } catch (error) {
                 console.error("Error fetching machines", error);
             }
+
+            try {
+                const pendRes = await axios.get('/api/frontend/machines/pending');
+                setPendingMachines(pendRes.data);
+
+                const newFingerprints = {};
+                for (const m of pendRes.data) {
+                    newFingerprints[m.id] = await getFingerprint(m.public_key);
+                }
+                setFingerprints(newFingerprints);
+            } catch (error) {
+                console.error("Error fetching pending machines", error);
+            }
         };
 
-        fetchMachines();
-        const interval = setInterval(fetchMachines, 10000);
+        fetchAll();
+        const interval = setInterval(fetchAll, 10000);
         return () => clearInterval(interval);
     }, []);
+
+
+    const handleApprove = async (id, status) => {
+        setApproving(prev => ({...prev, [id]: true}));
+        try {
+            await axios.post(`/api/frontend/machines/${id}/approve`, { status });
+            // Immediately remove from pending array in UI
+            setPendingMachines(prev => prev.filter(m => m.id !== id));
+            // Trigger machine fetch
+            const response = await axios.get('/api/frontend/machines');
+            setMachines(response.data);
+        } catch(e) {
+            console.error("Failed to approve/reject machine", e);
+        }
+        setApproving(prev => ({...prev, [id]: false}));
+    };
 
     const handleDownloadAgent = async () => {
         try {
@@ -50,6 +93,54 @@ function Dashboard() {
                     <Monitor size={18} className="mr-2"/> Download Agent
                 </button>
             </div>
+
+
+            {pendingMachines.length > 0 && (
+                <div className="mb-8 bg-yellow-50 rounded-lg p-6 border border-yellow-200 shadow-sm">
+                    <h2 className="text-lg font-bold text-yellow-800 mb-4 flex items-center">
+                        <AlertTriangle size={20} className="mr-2" /> Pending Agent Approvals
+                    </h2>
+                    <div className="overflow-x-auto">
+                        <table className="min-w-full bg-white rounded-lg overflow-hidden border">
+                            <thead className="bg-gray-50 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                                <tr>
+                                    <th className="px-4 py-3">Hostname</th>
+                                    <th className="px-4 py-3">OS</th>
+                                    <th className="px-4 py-3">IP Address</th>
+                                    <th className="px-4 py-3">Key Fingerprint</th>
+                                    <th className="px-4 py-3 text-right">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-200 text-sm">
+                                {pendingMachines.map(m => (
+                                    <tr key={m.id} className="hover:bg-gray-50">
+                                        <td className="px-4 py-3 font-medium text-gray-900">{m.hostname}</td>
+                                        <td className="px-4 py-3 text-gray-500">{m.os_name}</td>
+                                        <td className="px-4 py-3 text-gray-500 font-mono">{m.ip_address}</td>
+                                        <td className="px-4 py-3 text-gray-500 font-mono font-bold tracking-widest">{fingerprints[m.id] || "..."}</td>
+                                        <td className="px-4 py-3 text-right space-x-2">
+                                            <button
+                                                onClick={() => handleApprove(m.id, 'approved')}
+                                                disabled={approving[m.id]}
+                                                className="bg-green-600 text-white px-3 py-1 rounded text-xs hover:bg-green-700 disabled:opacity-50"
+                                            >
+                                                Approve
+                                            </button>
+                                            <button
+                                                onClick={() => handleApprove(m.id, 'rejected')}
+                                                disabled={approving[m.id]}
+                                                className="bg-red-600 text-white px-3 py-1 rounded text-xs hover:bg-red-700 disabled:opacity-50"
+                                            >
+                                                Reject
+                                            </button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {machines.map(machine => (
