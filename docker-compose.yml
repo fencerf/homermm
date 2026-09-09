@@ -5,6 +5,7 @@ services:
       - "8000:8000"
     volumes:
       - ./data:/app/data
+      - ./certs:/app/certs
     restart: unless-stopped
     environment:
       - ADMIN_PASSWORD=admin

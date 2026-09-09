@@ -205,7 +205,7 @@ def send_logs_to_server():
         log_flush_event.wait(LOG_FLUSH_INTERVAL)
         log_flush_event.clear()
         update_headers()
-    _flush_logs_now()
+        _flush_logs_now()
 
 # Start logging thread
 threading.Thread(target=send_logs_to_server, daemon=True).start()
