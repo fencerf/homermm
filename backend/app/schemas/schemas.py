@@ -17,6 +17,8 @@ class MachineBase(BaseModel):
     boot_time: Optional[int] = None
     reboot_pending: Optional[bool] = False
     timezone: Optional[str] = None
+    public_key: Optional[str] = None
+    approval_status: Optional[str] = 'pending'
 
 class MachineCreate(MachineBase):
     pass
@@ -27,6 +29,7 @@ class Machine(MachineBase):
     is_online: bool
     pending_software_updates: Optional[int] = 0
     pending_os_updates: Optional[int] = 0
+    approval_status: str = 'pending'
 
     class Config:
         orm_mode = True

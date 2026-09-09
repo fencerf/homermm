@@ -22,11 +22,8 @@ from fastapi import BackgroundTasks
 
 router = APIRouter()
 
+from app.core.security import verify_agent_key
 AGENT_API_KEY = os.environ.get("AGENT_API_KEY", "dummy_agent_key_123")
-
-def verify_agent_key(x_agent_key: str = Header(...)):
-    if x_agent_key != AGENT_API_KEY:
-        raise HTTPException(status_code=401, detail="Invalid Agent Key")
 
 def get_agent_dir_path():
     # Dev path (host machine) vs Docker path
@@ -69,8 +66,29 @@ def download_agent(background_tasks: BackgroundTasks, format: str = Query("py"),
 
     return FileResponse(f"{zip_path}.zip", filename="agent.zip", media_type="application/zip")
 
+@router.post("/enroll", response_model=schemas.Machine)
+def enroll_machine(machine: schemas.MachineCreate, db: Session = Depends(get_db)):
+    if not machine.public_key:
+        raise HTTPException(status_code=400, detail="Public key is required for enrollment")
+
+    db_machine = db.query(models.Machine).filter(models.Machine.hostname == machine.hostname).first()
+    if db_machine:
+        for var, value in vars(machine).items():
+            if var != "approval_status" or getattr(db_machine, var) != "approved":
+                setattr(db_machine, var, value)
+        db_machine.last_seen = datetime.utcnow()
+        db_machine.is_online = True
+    else:
+        db_machine = models.Machine(**machine.model_dump())
+        db_machine.approval_status = "pending"
+        db.add(db_machine)
+
+    db.commit()
+    db.refresh(db_machine)
+    return db_machine
+
 @router.post("/register", response_model=schemas.Machine)
-def register_machine(machine: schemas.MachineCreate, db: Session = Depends(get_db), _: str = Depends(verify_agent_key)):
+def register_machine(machine: schemas.MachineCreate, db: Session = Depends(get_db), payload: dict = Depends(verify_agent_key)):
     db_machine = db.query(models.Machine).filter(models.Machine.hostname == machine.hostname).first()
     if db_machine:
         # Update existing

@@ -29,7 +29,7 @@ def verify_admin(authorization: str = Header(None)):
 
 @router.get("/machines", response_model=List[schemas.Machine])
 def get_machines(db: Session = Depends(get_db), _: str = Depends(verify_admin)):
-    machines = db.query(models.Machine).all()
+    machines = db.query(models.Machine).filter(models.Machine.approval_status != "pending").all()
     results = []
     for machine in machines:
         software_updates = db.query(models.PendingUpdate).filter(
@@ -47,12 +47,36 @@ def get_machines(db: Session = Depends(get_db), _: str = Depends(verify_admin)):
         results.append(m_dict)
     return results
 
+@router.get("/machines/pending", response_model=List[schemas.Machine])
+def get_pending_machines(db: Session = Depends(get_db), _: str = Depends(verify_admin)):
+    machines = db.query(models.Machine).filter(models.Machine.approval_status == "pending").all()
+    results = []
+    for machine in machines:
+        m_dict = schemas.Machine.model_validate(machine).model_dump()
+        results.append(m_dict)
+    return results
+
 @router.get("/machines/{machine_id}", response_model=schemas.Machine)
 def get_machine(machine_id: int, db: Session = Depends(get_db), _: str = Depends(verify_admin)):
     machine = db.query(models.Machine).filter(models.Machine.id == machine_id).first()
     if not machine:
         raise HTTPException(status_code=404, detail="Machine not found")
     return machine
+
+class ApprovalRequest(BaseModel):
+    status: str
+
+@router.post("/machines/{machine_id}/approve")
+def approve_machine(machine_id: int, approval: ApprovalRequest, db: Session = Depends(get_db), _: str = Depends(verify_admin)):
+    machine = db.query(models.Machine).filter(models.Machine.id == machine_id).first()
+    if not machine:
+        raise HTTPException(status_code=404, detail="Machine not found")
+    if approval.status not in ["approved", "rejected"]:
+        raise HTTPException(status_code=400, detail="Invalid status")
+
+    machine.approval_status = approval.status
+    db.commit()
+    return {"status": "success", "approval_status": machine.approval_status}
 
 @router.get("/machines/{machine_id}/updates", response_model=List[schemas.PendingUpdate])
 def get_machine_updates(machine_id: int, db: Session = Depends(get_db), _: str = Depends(verify_admin)):

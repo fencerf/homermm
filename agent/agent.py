@@ -4,6 +4,8 @@ import platform
 import socket
 import time
 import subprocess
+from jose import jwt
+from key_utils import get_or_create_keypair, get_fingerprint
 import json
 import os
 import argparse
@@ -96,6 +98,7 @@ COMM_MODE = file_config.get("comm_mode") or os.environ.get("COMM_MODE", "sse") #
 AMQP_URL = file_config.get("amqp_url") or os.environ.get("AMQP_URL", "amqp://guest:guest@localhost/")
 
 LOG_FLUSH_INTERVAL = int(file_config.get("log_flush_interval") or os.environ.get("LOG_FLUSH_INTERVAL", "1800"))
+ENROLLMENT_INTERVAL = int(file_config.get("enrollment_interval") or os.environ.get("ENROLLMENT_INTERVAL", "30"))
 
 # Package Manager Configuration
 # Supported: winget, apt, choco, scoop, yum, brew
@@ -198,7 +201,8 @@ def send_logs_to_server():
         # Wait until timeout occurs or event is set explicitly
         log_flush_event.wait(LOG_FLUSH_INTERVAL)
         log_flush_event.clear()
-        _flush_logs_now()
+        update_headers()
+    _flush_logs_now()
 
 # Start logging thread
 threading.Thread(target=send_logs_to_server, daemon=True).start()
@@ -320,6 +324,12 @@ def get_system_info():
         import time
         agent_tz = time.tzname[time.localtime().tm_isdst > 0]
 
+    try:
+        _, pub_pem = get_or_create_keypair()
+    except Exception as e:
+        logger.error(f"Failed to generate/load keypair: {e}")
+        pub_pem = None
+
     return {
         "hostname": hostname,
         "os_name": os_name,
@@ -334,7 +344,8 @@ def get_system_info():
         "agent_version": AGENT_VERSION,
         "boot_time": boot_time,
         "reboot_pending": reboot_pending,
-        "timezone": agent_tz
+        "timezone": agent_tz,
+        "public_key": pub_pem
     }
 
 def get_available_updates():
@@ -510,6 +521,7 @@ def execute_task(task):
         global MACHINE_ID
         if MACHINE_ID:
             updates = get_available_updates()
+            update_headers()
             try:
                 requests.post(f"{SERVER_URL}/api/agent/{MACHINE_ID}/updates", json=updates, headers=HEADERS)
                 return "completed", "Successfully checked and pushed latest updates to server."
@@ -1195,6 +1207,7 @@ def heartbeat_loop():
     global MACHINE_ID
     while True:
         try:
+            update_headers()
             sys_info = get_system_info()
             resp = requests.post(f"{SERVER_URL}/api/agent/register", json=sys_info, headers=HEADERS)
             resp.raise_for_status()
@@ -1205,6 +1218,21 @@ def heartbeat_loop():
         # Send heartbeat every 60 seconds
         time.sleep(60)
 
+def update_headers():
+    global HEADERS
+    if MACHINE_ID is None:
+        return
+    try:
+        priv_pem, _ = get_or_create_keypair()
+        claims = {
+            "sub": str(MACHINE_ID),
+            "exp": time.time() + 3600 # 1 hour expiry
+        }
+        token = jwt.encode(claims, priv_pem, algorithm="RS256")
+        HEADERS["Authorization"] = f"Bearer {token}"
+    except Exception as e:
+        logger.error(f"Failed to generate JWT: {e}")
+
 def main_loop():
     global MACHINE_ID
 
@@ -1214,22 +1242,32 @@ def main_loop():
 
     logger.info(f"Agent starting... Connecting to {SERVER_URL}")
 
-    # 1. Initial Registration
+# 1. Initial Registration
     while MACHINE_ID is None:
         try:
             sys_info = get_system_info()
-            resp = requests.post(f"{SERVER_URL}/api/agent/register", json=sys_info, headers=HEADERS)
+            resp = requests.post(f"{SERVER_URL}/api/agent/enroll", json=sys_info)
             resp.raise_for_status()
             machine_data = resp.json()
-            MACHINE_ID = machine_data["id"]
+            if machine_data.get("approval_status") == "approved":
+                MACHINE_ID = machine_data["id"]
+                update_headers()
+                logger.info(f"Successfully registered as machine ID: {MACHINE_ID}")
+            else:
+                try:
+                    _, pub = get_or_create_keypair()
+                    fingerprint = get_fingerprint(pub)
+                except:
+                    fingerprint = "UNKNOWN"
+                logger.info(f"Agent enrollment pending. Waiting for administrator approval in the UI... Fingerprint: {fingerprint}. Retrying in {ENROLLMENT_INTERVAL} seconds...")
+                time.sleep(ENROLLMENT_INTERVAL)
         except Exception as e:
-            logger.error(f"Initial registration failed: {e}. Retrying in 5 seconds...")
-            time.sleep(5)
-
-    logger.info(f"Successfully registered as machine ID: {MACHINE_ID}")
+            logger.error(f"Initial registration/enrollment failed: {e}. Retrying in {ENROLLMENT_INTERVAL} seconds...")
+            time.sleep(ENROLLMENT_INTERVAL)
     # Fetch and submit scheduled tasks on startup
     try:
         _, tasks_json = execute_task({"task_type": "list_scheduled_tasks", "payload": "{}"})
+        update_headers()
         task_res = requests.post(
             f"{SERVER_URL}/api/agent/{MACHINE_ID}/scheduled-tasks/sync",
             json={"result_message": tasks_json},
@@ -1241,6 +1279,7 @@ def main_loop():
         logger.error(f"Failed to report initial scheduled tasks: {e}")
 
     # Flush any startup logs immediately to the server
+    update_headers()
     _flush_logs_now()
 
     # Start heartbeat in background
