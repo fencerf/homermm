@@ -1311,16 +1311,16 @@ def main_loop():
     # 2. Start Listener
     listener = None
     if COMM_MODE == "standard":
-        listener = agent_comm.StandardPollingListener(SERVER_URL, HEADERS, MACHINE_ID, execute_task)
+        listener = agent_comm.StandardPollingListener(SERVER_URL, HEADERS, MACHINE_ID, execute_task, verify_ssl=VERIFY_SSL)
     elif COMM_MODE == "long_polling":
-        listener = agent_comm.LongPollingListener(SERVER_URL, HEADERS, MACHINE_ID, execute_task)
+        listener = agent_comm.LongPollingListener(SERVER_URL, HEADERS, MACHINE_ID, execute_task, verify_ssl=VERIFY_SSL)
     elif COMM_MODE == "sse":
-        listener = agent_comm.SSEListener(SERVER_URL, HEADERS, MACHINE_ID, execute_task)
+        listener = agent_comm.SSEListener(SERVER_URL, HEADERS, MACHINE_ID, execute_task, verify_ssl=VERIFY_SSL)
     elif COMM_MODE == "amqp":
-        listener = agent_comm.AMQPListener(AMQP_URL, SERVER_URL, HEADERS, MACHINE_ID, execute_task)
+        listener = agent_comm.AMQPListener(AMQP_URL, SERVER_URL, HEADERS, MACHINE_ID, execute_task, verify_ssl=VERIFY_SSL)
     else:
         logger.error(f"Unknown COMM_MODE: {COMM_MODE}. Falling back to standard polling.")
-        listener = agent_comm.StandardPollingListener(SERVER_URL, HEADERS, MACHINE_ID, execute_task)
+        listener = agent_comm.StandardPollingListener(SERVER_URL, HEADERS, MACHINE_ID, execute_task, verify_ssl=VERIFY_SSL)
 
     try:
         listener.start()
