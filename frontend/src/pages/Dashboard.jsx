@@ -58,10 +58,35 @@ const fetchAll = async () => {
     }, []);
 
 
-    const handleApprove = async (id, status) => {
+    const handleApprove = async (id, status, pendingMachine = null) => {
+        let reassociate_id = null;
+
+        if (status === 'approved' && pendingMachine) {
+            // Check if there is a deprovisioned machine with the same hostname and MAC
+            const match = machines.find(m =>
+                m.approval_status === "deprovisioned" &&
+                m.hostname === pendingMachine.hostname &&
+                m.mac_address && m.mac_address === pendingMachine.mac_address
+            );
+
+            if (match) {
+                const wantsReassociate = window.confirm(
+                    `This machine matches a previously deprovisioned agent (${match.hostname}). ` +
+                    `Do you want to re-associate this new agent with the previous historical data and scheduled tasks? ` +
+                    `\n\nClick OK to merge, or Cancel to approve as a completely new machine.`
+                );
+                if (wantsReassociate) {
+                    reassociate_id = match.id;
+                }
+            }
+        }
+
         setApproving(prev => ({...prev, [id]: true}));
         try {
-            await axios.post(`/api/frontend/machines/${id}/approve`, { status });
+            await axios.post(`/api/frontend/machines/${id}/approve`, {
+                status,
+                reassociate_id
+            });
             // Immediately remove from pending array in UI
             setPendingMachines(prev => prev.filter(m => m.id !== id));
             // Trigger machine fetch
@@ -126,14 +151,14 @@ const fetchAll = async () => {
                                         <td className="px-4 py-3 text-gray-500 font-mono font-bold tracking-widest">{fingerprints[m.id] || "..."}</td>
                                         <td className="px-4 py-3 text-right space-x-2">
                                             <button
-                                                onClick={() => handleApprove(m.id, 'approved')}
+                                                onClick={() => handleApprove(m.id, 'approved', m)}
                                                 disabled={approving[m.id]}
                                                 className="bg-green-600 text-white px-3 py-1 rounded text-xs hover:bg-green-700 disabled:opacity-50"
                                             >
                                                 Approve
                                             </button>
                                             <button
-                                                onClick={() => handleApprove(m.id, 'rejected')}
+                                                onClick={() => handleApprove(m.id, 'rejected', m)}
                                                 disabled={approving[m.id]}
                                                 className="bg-red-600 text-white px-3 py-1 rounded text-xs hover:bg-red-700 disabled:opacity-50"
                                             >
@@ -168,17 +193,32 @@ const fetchAll = async () => {
                                             <Download size={18} />
                                         </div>
                                     )}
-                                    <div className={`w-3 h-3 rounded-full ${machine.is_online ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                                    {machine.approval_status === "deprovisioned" ? (
+                                        <span className="text-xs font-bold text-gray-500 uppercase">Deprovisioned</span>
+                                    ) : (
+                                        <div className={`w-3 h-3 rounded-full ${machine.is_online ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                                    )}
                                 </div>
                             </div>
 
                             <div className="space-y-2 text-sm text-gray-600">
                                 <p className="flex justify-between"><span>OS:</span> <span className="font-medium">{machine.os_name} {machine.os_version}</span></p>
                                 <p className="flex justify-between"><span>IP:</span> <span className="font-medium">{machine.ip_address}</span></p>
-                                <p className="flex items-center justify-between mt-4 pt-4 border-t text-xs text-gray-500">
-                                    <span className="flex items-center"><Clock size={12} className="mr-1"/> Last seen:</span>
-                                    <span>{formatTime(machine.last_seen)}</span>
-                                </p>
+                                <div className="flex items-center justify-between mt-4 pt-4 border-t text-xs text-gray-500">
+                                    <p className="flex items-center">
+                                        <span className="flex items-center"><Clock size={12} className="mr-1"/> Last seen:</span>
+                                        <span className="ml-1">{machine.is_online ? "Just now" : formatTime(machine.last_seen)}</span>
+                                    </p>
+                                    {machine.approval_status !== "deprovisioned" && (
+                                        <button
+                                            onClick={(e) => handleDeprovision(e, machine.id)}
+                                            className="text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-50 transition-colors z-20 relative"
+                                            title="Deprovision Machine"
+                                        >
+                                            <Trash2 size={16} />
+                                        </button>
+                                    )}
+                                </div>
                             </div>
                         </div>
                     </Link>

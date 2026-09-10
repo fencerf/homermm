@@ -21,6 +21,7 @@ import sys
 import shutil
 import zipfile
 import tempfile
+import uuid
 
 # Thread-local storage to track the current action ID
 local_data = threading.local()
@@ -315,6 +316,10 @@ def get_system_info():
     # Network
     hostname = socket.gethostname()
     ip_address = socket.gethostbyname(hostname)
+    try:
+        mac_address = ':'.join(['{:02x}'.format((uuid.getnode() >> i) & 0xff) for i in range(0,8*6,8)][::-1])
+    except:
+        mac_address = None
 
     network_info = []
     try:
@@ -361,7 +366,8 @@ def get_system_info():
         "boot_time": boot_time,
         "reboot_pending": reboot_pending,
         "timezone": agent_tz,
-        "public_key": pub_pem
+        "public_key": pub_pem,
+        "mac_address": mac_address
     }
 
 def get_available_updates():
@@ -1089,6 +1095,31 @@ def execute_task(task):
          else:
              # In linux cron we can't easily run it directly, we'd have to parse the command
              return "completed", f"Triggered Linux task: {task_name}"
+    elif task_type == "wipe_config_and_restart":
+        logger.warning("Received wipe_config_and_restart task. Deprovisioning agent...")
+        try:
+            global MACHINE_ID
+            MACHINE_ID = None
+            config_data = {}
+            if os.path.exists(CONFIG_PATH):
+                with open(CONFIG_PATH, "r") as f:
+                    config_data = json.load(f)
+            if "machine_id" in config_data:
+                del config_data["machine_id"]
+            with open(CONFIG_PATH, "w") as f:
+                json.dump(config_data, f, indent=4)
+            logger.info("Cleared MACHINE_ID from config. Restarting agent to initiate enrollment...")
+
+            # Send the completed status back *before* we restart
+            from threading import Timer
+            def restart_agent():
+                os.execv(sys.executable, [sys.executable] + sys.argv)
+            Timer(1.0, restart_agent).start()
+
+            return "completed", "Configuration wiped, restarting agent..."
+        except Exception as e:
+            logger.error(f"Failed to deprovision agent: {e}")
+            return "failed", str(e)
     return "failed", f"Unknown task type: {task_type}"
 
 def interactive_filebrowser_ws():

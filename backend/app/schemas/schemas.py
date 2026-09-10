@@ -19,6 +19,7 @@ class MachineBase(BaseModel):
     timezone: Optional[str] = None
     public_key: Optional[str] = None
     approval_status: Optional[str] = 'pending'
+    mac_address: Optional[str] = None
 
 class MachineCreate(MachineBase):
     pass

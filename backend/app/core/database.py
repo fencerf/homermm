@@ -85,6 +85,11 @@ def init_db():
         except Exception:
             pass
 
+        try:
+            conn.execute(text("ALTER TABLE machines ADD COLUMN mac_address VARCHAR"))
+        except Exception:
+            pass
+
         conn.commit()
 
 

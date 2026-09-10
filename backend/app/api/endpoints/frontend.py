@@ -65,6 +65,7 @@ def get_machine(machine_id: int, db: Session = Depends(get_db), _: str = Depends
 
 class ApprovalRequest(BaseModel):
     status: str
+    reassociate_id: Optional[int] = None
 
 @router.post("/machines/{machine_id}/approve")
 def approve_machine(machine_id: int, approval: ApprovalRequest, db: Session = Depends(get_db), _: str = Depends(verify_admin)):
@@ -74,8 +75,67 @@ def approve_machine(machine_id: int, approval: ApprovalRequest, db: Session = De
     if approval.status not in ["approved", "rejected"]:
         raise HTTPException(status_code=400, detail="Invalid status")
 
+    if approval.status == "approved" and approval.reassociate_id:
+        target_machine = db.query(models.Machine).filter(models.Machine.id == approval.reassociate_id).first()
+        if not target_machine:
+            raise HTTPException(status_code=404, detail="Reassociation target machine not found")
+
+        # Merge new agent's public key and dynamic stats into the historical record
+        target_machine.public_key = machine.public_key
+        target_machine.approval_status = "approved"
+        target_machine.last_seen = machine.last_seen
+        target_machine.is_online = True
+
+        target_machine.os_name = machine.os_name
+        target_machine.os_version = machine.os_version
+        target_machine.cpu_info = machine.cpu_info
+        target_machine.memory_total = machine.memory_total
+        target_machine.disk_total = machine.disk_total
+        target_machine.disk_used = machine.disk_used
+        target_machine.ip_address = machine.ip_address
+        target_machine.network_info = machine.network_info
+        target_machine.agent_version = machine.agent_version
+        target_machine.boot_time = machine.boot_time
+        target_machine.reboot_pending = machine.reboot_pending
+        target_machine.timezone = machine.timezone
+        target_machine.mac_address = machine.mac_address
+
+        # Delete the duplicate pending machine entry since we merged it
+        db.delete(machine)
+        db.commit()
+        return {"status": "success", "approval_status": target_machine.approval_status, "reassociated_to": target_machine.id}
+
     machine.approval_status = approval.status
     db.commit()
+    return {"status": "success", "approval_status": machine.approval_status}
+
+@router.post("/machines/{machine_id}/deprovision")
+async def deprovision_machine(machine_id: int, db: Session = Depends(get_db), _: str = Depends(verify_admin)):
+    machine = db.query(models.Machine).filter(models.Machine.id == machine_id).first()
+    if not machine:
+        raise HTTPException(status_code=404, detail="Machine not found")
+
+    machine.approval_status = "deprovisioned"
+
+    # Create a task to wipe the agent's config and restart
+    db_task = models.AgentTask(
+        machine_id=machine_id,
+        task_type="wipe_config_and_restart",
+        payload="{}"
+    )
+    db.add(db_task)
+    db.commit()
+    db.refresh(db_task)
+
+    task_data = schemas.AgentTask.model_validate(db_task).model_dump()
+    task_data['created_at'] = task_data['created_at'].isoformat()
+    if task_data['scheduled_for']:
+        task_data['scheduled_for'] = task_data['scheduled_for'].isoformat()
+    if task_data['completed_at']:
+        task_data['completed_at'] = task_data['completed_at'].isoformat()
+
+    await agent_events.notify_task_created(machine_id, task_data)
+
     return {"status": "success", "approval_status": machine.approval_status}
 
 @router.get("/machines/{machine_id}/updates", response_model=List[schemas.PendingUpdate])

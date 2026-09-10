@@ -26,6 +26,7 @@ class Machine(Base):
     timezone = Column(String, nullable=True)
     public_key = Column(Text, nullable=True)
     approval_status = Column(String, default='pending')
+    mac_address = Column(String, nullable=True)
 
     updates = relationship("PendingUpdate", back_populates="machine", cascade="all, delete-orphan")
     tasks = relationship("AgentTask", back_populates="machine", cascade="all, delete-orphan")

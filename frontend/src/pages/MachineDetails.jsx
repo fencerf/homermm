@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Cpu, HardDrive, Database, RefreshCw, Archive, FolderSearch, Terminal, List, Clock, ChevronDown, ChevronRight, Folder } from 'lucide-react';
+import { ArrowLeft, Cpu, HardDrive, Database, RefreshCw, Archive, FolderSearch, Terminal, List, Clock, ChevronDown, ChevronRight, Folder, Trash2 } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import RemoteFileBrowser from '../components/RemoteFileBrowser';
 import MachineLogsModal from '../components/MachineLogsModal';
@@ -223,6 +223,21 @@ function MachineDetails() {
             setTimeout(() => setActionMessage(null), 3000);
         } catch (error) {
             console.error("Error scheduling update", error);
+        }
+    };
+
+    const handleDeprovision = async () => {
+        if (!window.confirm("Are you sure you want to deprovision this machine? It will be disconnected and its config wiped.")) {
+            return;
+        }
+        try {
+            await axios.post(`/api/frontend/machines/${id}/deprovision`);
+            fetchMachineData();
+            setActionMessage({ type: 'success', text: "Machine deprovisioning task submitted." });
+            setTimeout(() => setActionMessage(null), 3000);
+        } catch (error) {
+            console.error("Failed to deprovision machine:", error);
+            setActionMessage({ type: 'error', text: "Failed to deprovision machine." });
         }
     };
 
@@ -562,6 +577,15 @@ const fetchScheduledTasks = async () => {
                             >
                                 Event Logs
                             </button>
+                            {machine.approval_status !== "deprovisioned" && (
+                                <button
+                                    onClick={handleDeprovision}
+                                    className="px-3 py-1 bg-red-100 hover:bg-red-200 text-red-700 border border-red-300 text-xs rounded shadow flex items-center transition-colors"
+                                    title="Deprovision Machine"
+                                >
+                                    <Trash2 size={14} className="mr-1" /> Deprovision
+                                </button>
+                            )}
                             <button
                                 onClick={async () => {
                                     try {
