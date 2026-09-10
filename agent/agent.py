@@ -83,6 +83,15 @@ if os.path.exists(config_path):
     except Exception as e:
         print(f"Failed to load config.json: {e}")
 
+def save_config(new_config):
+    global file_config
+    file_config.update(new_config)
+    try:
+        with open(config_path, "w") as f:
+            json.dump(file_config, f, indent=4)
+    except Exception as e:
+        logger.error(f"Failed to save config.json: {e}")
+
 # Parse command line arguments (using parse_known_args to not crash on win32 service arguments)
 parser = argparse.ArgumentParser(description="HCMS Client Agent")
 parser.add_argument("-s", "--server", type=str, help="Address of the HCMS server (e.g. http://192.168.1.100:8000)")
@@ -97,7 +106,7 @@ _raw_verify = file_config.get("verify_ssl", True)
 VERIFY_SSL = not args.insecure if args.insecure else (str(_raw_verify).lower() not in ('false', '0', 'no', 'f') if isinstance(_raw_verify, str) else bool(_raw_verify))
 AGENT_API_KEY = file_config.get("api_key") or os.environ.get("AGENT_API_KEY", "dummy_agent_key_123")
 HEADERS = {"x-agent-key": AGENT_API_KEY}
-MACHINE_ID = None
+MACHINE_ID = file_config.get("machine_id")
 
 # Comms configuration
 COMM_MODE = file_config.get("comm_mode") or os.environ.get("COMM_MODE", "long_polling") # Choices: standard, long_polling, sse, amqp
@@ -418,13 +427,16 @@ def get_available_updates():
                             import re
                             parts = re.split(r'\s{2,}', line.strip())
                             if len(parts) >= 3:
-                                updates.append({
-                                    "package_name": parts[1] if len(parts) > 3 else parts[0],
-                                    "description": parts[0],
-                                    "current_version": parts[2] if len(parts) > 4 else None,
-                                    "new_version": parts[-2] if len(parts) > 3 else parts[-1],
-                                    "update_type": "software"
-                                })
+                                try:
+                                    updates.append({
+                                        "package_name": parts[1] if len(parts) > 3 else parts[0],
+                                        "description": parts[0],
+                                        "current_version": parts[2] if len(parts) > 4 else None,
+                                        "new_version": parts[-2] if len(parts) >= 3 and len(parts) > 3 else parts[-1],
+                                        "update_type": "software"
+                                    })
+                                except IndexError:
+                                    pass
 
             elif PACKAGE_MANAGER == "choco":
                 lines = result.stdout.split('\n')
@@ -1254,6 +1266,10 @@ def main_loop():
     logger.info(f"Agent starting... Connecting to {SERVER_URL}")
 
 # 1. Initial Registration
+    if MACHINE_ID is not None:
+        logger.info(f"Machine ID found in config: {MACHINE_ID}. Bypassing enrollment.")
+        update_headers()
+
     while MACHINE_ID is None:
         try:
             sys_info = get_system_info()
@@ -1262,8 +1278,9 @@ def main_loop():
             machine_data = resp.json()
             if machine_data.get("approval_status") == "approved":
                 MACHINE_ID = machine_data["id"]
+                save_config({"machine_id": MACHINE_ID})
                 update_headers()
-                logger.info(f"Successfully registered as machine ID: {MACHINE_ID}")
+                logger.info(f"Successfully enrolled and registered as machine ID: {MACHINE_ID}")
             else:
                 try:
                     _, pub = get_or_create_keypair()
@@ -1275,6 +1292,7 @@ def main_loop():
         except Exception as e:
             logger.error(f"Initial registration/enrollment failed: {e}. Retrying in {ENROLLMENT_INTERVAL} seconds...")
             time.sleep(ENROLLMENT_INTERVAL)
+
     # Fetch and submit scheduled tasks on startup
     try:
         _, tasks_json = execute_task({"task_type": "list_scheduled_tasks", "payload": "{}"})
