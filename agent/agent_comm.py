@@ -46,9 +46,11 @@ class StandardPollingListener(BaseListener):
         while self.running:
             try:
                 resp = requests.get(f"{self.server_url}/api/agent/{self.machine_id}/tasks", headers=self.headers, verify=self.verify_ssl)
+                resp.raise_for_status()
                 tasks = resp.json()
-                for task in tasks:
-                    self._handle_task(task)
+                if isinstance(tasks, list):
+                    for task in tasks:
+                        self._handle_task(task)
             except Exception as e:
                 logger.error(f"Polling error: {e}")
             time.sleep(5)
@@ -58,9 +60,11 @@ class LongPollingListener(BaseListener):
         while self.running:
             try:
                 resp = requests.get(f"{self.server_url}/api/agent/{self.machine_id}/tasks?timeout=30", headers=self.headers, timeout=35, verify=self.verify_ssl)
+                resp.raise_for_status()
                 tasks = resp.json()
-                for task in tasks:
-                    self._handle_task(task)
+                if isinstance(tasks, list):
+                    for task in tasks:
+                        self._handle_task(task)
             except requests.exceptions.ReadTimeout:
                 pass # Normal for long polling
             except Exception as e:
@@ -72,9 +76,11 @@ class SSEListener(BaseListener):
         # We still do an initial poll to catch up on any missed events while starting
         try:
             resp = requests.get(f"{self.server_url}/api/agent/{self.machine_id}/tasks", headers=self.headers, verify=self.verify_ssl)
+            resp.raise_for_status()
             tasks = resp.json()
-            for task in tasks:
-                self._handle_task(task)
+            if isinstance(tasks, list):
+                for task in tasks:
+                    self._handle_task(task)
         except:
             pass
 

@@ -414,15 +414,17 @@ def get_available_updates():
                             description = line[0:id_idx].strip()
                             package_id = line[id_idx:ver_idx].strip()
                             current_version = line[ver_idx:avail_idx].strip()
-                            available_version = line[avail_idx:].split()[0].strip()
-                            if package_id and available_version:
-                                updates.append({
-                                    "package_name": package_id,
-                                    "description": description,
-                                    "current_version": current_version,
-                                    "new_version": available_version,
-                                    "update_type": "software"
-                                })
+                            parts = line[avail_idx:].split()
+                            if parts:
+                                available_version = parts[0].strip()
+                                if package_id and available_version:
+                                    updates.append({
+                                        "package_name": package_id,
+                                        "description": description,
+                                        "current_version": current_version,
+                                        "new_version": available_version,
+                                        "update_type": "software"
+                                    })
                         else:
                             import re
                             parts = re.split(r'\s{2,}', line.strip())
@@ -1233,6 +1235,20 @@ def heartbeat_loop():
             update_headers()
             sys_info = get_system_info()
             resp = requests.post(f"{SERVER_URL}/api/agent/register", json=sys_info, headers=HEADERS, verify=VERIFY_SSL)
+            if resp.status_code == 401:
+                logger.error("401 Unauthorized during heartbeat. The agent's key may not match the server's record. Re-enrolling...")
+                global MACHINE_ID
+                MACHINE_ID = None
+                config_data = {}
+                if os.path.exists(CONFIG_PATH):
+                    with open(CONFIG_PATH, "r") as f:
+                        config_data = json.load(f)
+                if "machine_id" in config_data:
+                    del config_data["machine_id"]
+                with open(CONFIG_PATH, "w") as f:
+                    json.dump(config_data, f, indent=4)
+                logger.info("Cleared MACHINE_ID from config. Restarting agent to initiate enrollment...")
+                os.execv(sys.executable, [sys.executable] + sys.argv)
             resp.raise_for_status()
             machine_data = resp.json()
             MACHINE_ID = machine_data["id"]
