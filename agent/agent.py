@@ -1237,7 +1237,7 @@ def update_headers():
         priv_pem, _ = get_or_create_keypair()
         claims = {
             "sub": str(MACHINE_ID),
-            "exp": time.time() + 3600 # 1 hour expiry
+            "exp": int(time.time() + 3600) # 1 hour expiry, must be integer
         }
         token = jwt.encode(claims, priv_pem, algorithm="RS256")
         HEADERS["Authorization"] = f"Bearer {token}"
