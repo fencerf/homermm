@@ -4,7 +4,10 @@ import platform
 import socket
 import time
 import subprocess
+import urllib3
 from jose import jwt
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from key_utils import get_or_create_keypair, get_fingerprint
 import json
 import os
@@ -90,13 +93,14 @@ args, unknown_args = parser.parse_known_args()
 
 # Configuration hierarchy: Args > Config File > Environment > Default
 SERVER_URL = args.server or file_config.get("server") or os.environ.get("SERVER_URL", "https://127.0.0.1:8000")
-VERIFY_SSL = not args.insecure if args.insecure else file_config.get("verify_ssl", True)
+_raw_verify = file_config.get("verify_ssl", True)
+VERIFY_SSL = not args.insecure if args.insecure else (str(_raw_verify).lower() not in ('false', '0', 'no', 'f') if isinstance(_raw_verify, str) else bool(_raw_verify))
 AGENT_API_KEY = file_config.get("api_key") or os.environ.get("AGENT_API_KEY", "dummy_agent_key_123")
 HEADERS = {"x-agent-key": AGENT_API_KEY}
 MACHINE_ID = None
 
 # Comms configuration
-COMM_MODE = file_config.get("comm_mode") or os.environ.get("COMM_MODE", "sse") # Choices: standard, long_polling, sse, amqp
+COMM_MODE = file_config.get("comm_mode") or os.environ.get("COMM_MODE", "long_polling") # Choices: standard, long_polling, sse, amqp
 AMQP_URL = file_config.get("amqp_url") or os.environ.get("AMQP_URL", "amqp://guest:guest@localhost/")
 
 LOG_FLUSH_INTERVAL = int(file_config.get("log_flush_interval") or os.environ.get("LOG_FLUSH_INTERVAL", "1800"))
