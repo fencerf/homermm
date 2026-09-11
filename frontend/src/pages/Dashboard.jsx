@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Link } from 'react-router-dom';
-import { Server, Monitor, Clock, AlertTriangle, Download } from 'lucide-react';
+import { Server, Monitor, Clock, AlertTriangle, Download, Trash2, Eye, EyeOff } from 'lucide-react';
 import { fetchServerTimezone, formatTime } from '../utils/timezone';
 
 
@@ -26,6 +26,7 @@ function Dashboard() {
     const [pendingMachines, setPendingMachines] = useState([]);
     const [fingerprints, setFingerprints] = useState({});
     const [approving, setApproving] = useState({});
+    const [showDeprovisioned, setShowDeprovisioned] = useState(false);
 
     useEffect(() => {
         fetchServerTimezone(); // pre-fetch timezone on dashboard load
@@ -79,6 +80,20 @@ const fetchAll = async () => {
             console.error("Failed to approve/reject machine", e);
         }
         setApproving(prev => ({...prev, [id]: false}));
+    };
+
+    const handleDeprovision = async (e, id) => {
+        e.preventDefault(); // Prevent navigating to MachineDetails
+        if (!window.confirm("Are you sure you want to deprovision this machine? It will be disconnected and its config wiped.")) {
+            return;
+        }
+        try {
+            await axios.post(`/api/frontend/machines/${id}/deprovision`);
+            fetchAll();
+        } catch (error) {
+            console.error("Failed to deprovision machine:", error);
+            alert("Failed to deprovision machine.");
+        }
     };
 
     const handleDownloadAgent = async () => {
@@ -156,10 +171,22 @@ const fetchAll = async () => {
                 </div>
             )}
 
+            <div className="flex justify-end mb-4">
+                <button
+                    onClick={() => setShowDeprovisioned(!showDeprovisioned)}
+                    className="flex items-center text-sm text-gray-600 hover:text-gray-900 transition-colors bg-white px-3 py-1.5 rounded border shadow-sm"
+                >
+                    {showDeprovisioned ? <><EyeOff size={16} className="mr-2" /> Hide Deprovisioned</> : <><Eye size={16} className="mr-2" /> Show Deprovisioned</>}
+                </button>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {machines.map(machine => (
-                    <Link to={`/machine/${machine.id}`} key={machine.id} className="block hover:shadow-xl transition-shadow duration-200">
-                        <div className={`bg-white rounded-lg p-6 shadow-md border border-gray-200 ${!machine.is_online ? 'opacity-60 grayscale' : ''}`}>
+                {machines.filter(m => showDeprovisioned || m.approval_status !== "deprovisioned").map(machine => (
+                    <Link to={`/machine/${machine.id}`} key={machine.id} className="block hover:shadow-xl transition-shadow duration-200 relative group">
+                        {machine.approval_status === "deprovisioned" && (
+                            <div className="absolute inset-0 bg-gray-50/50 rounded-lg pointer-events-none z-10"></div>
+                        )}
+                        <div className={`bg-white rounded-lg p-6 shadow-md border border-gray-200 ${(!machine.is_online || machine.approval_status === "deprovisioned") ? 'opacity-60 grayscale' : ''}`}>
                             <div className="flex items-center justify-between mb-4">
                                 <div className="flex items-center space-x-3">
                                     <Monitor className={`text-blue-500 ${!machine.is_online ? 'text-gray-400' : ''}`} size={24} />

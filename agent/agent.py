@@ -108,6 +108,7 @@ VERIFY_SSL = not args.insecure if args.insecure else (str(_raw_verify).lower() n
 AGENT_API_KEY = file_config.get("api_key") or os.environ.get("AGENT_API_KEY", "dummy_agent_key_123")
 HEADERS = {"x-agent-key": AGENT_API_KEY}
 MACHINE_ID = file_config.get("machine_id")
+listener = None
 
 # Comms configuration
 COMM_MODE = file_config.get("comm_mode") or os.environ.get("COMM_MODE", "long_polling") # Choices: standard, long_polling, sse, amqp
@@ -1098,6 +1099,7 @@ def execute_task(task):
     elif task_type == "wipe_config_and_restart":
         logger.warning("Received wipe_config_and_restart task. Deprovisioning agent...")
         try:
+            global listener
             MACHINE_ID = None
             config_data = {}
             if os.path.exists(CONFIG_PATH):
@@ -1108,6 +1110,9 @@ def execute_task(task):
             with open(CONFIG_PATH, "w") as f:
                 json.dump(config_data, f, indent=4)
             logger.info("Cleared MACHINE_ID from config. Restarting agent to initiate enrollment...")
+
+            if listener:
+                listener.stop()
 
             # Send the completed status back *before* we restart
             from threading import Timer
@@ -1260,6 +1265,7 @@ def handle_exit_signal(signum, frame):
 def heartbeat_loop():
     """Background thread to periodically send registration/heartbeats"""
     global MACHINE_ID
+    global listener
     while True:
         try:
             update_headers()
@@ -1277,6 +1283,8 @@ def heartbeat_loop():
                 with open(CONFIG_PATH, "w") as f:
                     json.dump(config_data, f, indent=4)
                 logger.info("Cleared MACHINE_ID from config. Restarting agent to initiate enrollment...")
+                if listener:
+                    listener.stop()
                 os.execv(sys.executable, [sys.executable] + sys.argv)
             resp.raise_for_status()
             machine_data = resp.json()
@@ -1303,6 +1311,7 @@ def update_headers():
 
 def main_loop():
     global MACHINE_ID
+    global listener
 
     if threading.current_thread() is threading.main_thread():
         signal.signal(signal.SIGINT, handle_exit_signal)
@@ -1372,7 +1381,6 @@ def main_loop():
     logger.info(f"Registered as Machine ID: {MACHINE_ID}. Starting {COMM_MODE} listener...")
 
     # 2. Start Listener
-    listener = None
     if COMM_MODE == "standard":
         listener = agent_comm.StandardPollingListener(SERVER_URL, HEADERS, MACHINE_ID, execute_task, verify_ssl=VERIFY_SSL)
     elif COMM_MODE == "long_polling":
