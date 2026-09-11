@@ -61,25 +61,8 @@ const fetchAll = async () => {
     const handleApprove = async (id, status, pendingMachine = null) => {
         let reassociate_id = null;
 
-        if (status === 'approved' && pendingMachine) {
-            // Check if there is a deprovisioned machine with the same hostname and MAC
-            const match = machines.find(m =>
-                m.approval_status === "deprovisioned" &&
-                m.hostname === pendingMachine.hostname &&
-                m.mac_address && m.mac_address === pendingMachine.mac_address
-            );
-
-            if (match) {
-                const wantsReassociate = window.confirm(
-                    `This machine matches a previously deprovisioned agent (${match.hostname}). ` +
-                    `Do you want to re-associate this new agent with the previous historical data and scheduled tasks? ` +
-                    `\n\nClick OK to merge, or Cancel to approve as a completely new machine.`
-                );
-                if (wantsReassociate) {
-                    reassociate_id = match.id;
-                }
-            }
-        }
+        // We removed the complex multi-row deduplication logic because SQLite unique constraints
+        // force us to reuse the same row. Re-association happens automatically now.
 
         setApproving(prev => ({...prev, [id]: true}));
         try {

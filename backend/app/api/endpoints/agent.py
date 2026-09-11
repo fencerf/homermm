@@ -71,7 +71,9 @@ def enroll_machine(machine: schemas.MachineCreate, db: Session = Depends(get_db)
     if not machine.public_key:
         raise HTTPException(status_code=400, detail="Public key is required for enrollment")
 
+    # Query by hostname, as the database has a UNIQUE constraint on it.
     db_machine = db.query(models.Machine).filter(models.Machine.hostname == machine.hostname).first()
+
     if db_machine:
         # If the machine is already approved, don't allow modifying the public key via unauthenticated /enroll
         if db_machine.approval_status == "approved" and machine.public_key != db_machine.public_key:
@@ -80,9 +82,15 @@ def enroll_machine(machine: schemas.MachineCreate, db: Session = Depends(get_db)
         for var, value in vars(machine).items():
             if var != "approval_status":
                 setattr(db_machine, var, value)
-        # If the machine was rejected, keep it rejected unless the admin changes it via UI, do not flip back to pending
-        # Actually, in the plan step 2, "Prevent overwriting approval_status to 'pending' if the machine is already 'rejected'."
-        # The loop above overwrites it if it's not "approval_status".
+
+        # If the machine was previously deprovisioned, it means a fresh agent is attempting to re-enroll
+        # on the same host. We must flip it back to 'pending' so it appears in the UI queue for re-association approval.
+        if db_machine.approval_status == "deprovisioned":
+            db_machine.approval_status = "pending"
+            # Explicitly overwrite the public key in case they want to merge it
+            db_machine.public_key = machine.public_key
+
+        # If the machine was rejected, we keep it rejected unless the admin changes it via UI.
 
         db_machine.last_seen = datetime.utcnow()
         db_machine.is_online = True

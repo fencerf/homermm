@@ -75,36 +75,6 @@ def approve_machine(machine_id: int, approval: ApprovalRequest, db: Session = De
     if approval.status not in ["approved", "rejected"]:
         raise HTTPException(status_code=400, detail="Invalid status")
 
-    if approval.status == "approved" and approval.reassociate_id:
-        target_machine = db.query(models.Machine).filter(models.Machine.id == approval.reassociate_id).first()
-        if not target_machine:
-            raise HTTPException(status_code=404, detail="Reassociation target machine not found")
-
-        # Merge new agent's public key and dynamic stats into the historical record
-        target_machine.public_key = machine.public_key
-        target_machine.approval_status = "approved"
-        target_machine.last_seen = machine.last_seen
-        target_machine.is_online = True
-
-        target_machine.os_name = machine.os_name
-        target_machine.os_version = machine.os_version
-        target_machine.cpu_info = machine.cpu_info
-        target_machine.memory_total = machine.memory_total
-        target_machine.disk_total = machine.disk_total
-        target_machine.disk_used = machine.disk_used
-        target_machine.ip_address = machine.ip_address
-        target_machine.network_info = machine.network_info
-        target_machine.agent_version = machine.agent_version
-        target_machine.boot_time = machine.boot_time
-        target_machine.reboot_pending = machine.reboot_pending
-        target_machine.timezone = machine.timezone
-        target_machine.mac_address = machine.mac_address
-
-        # Delete the duplicate pending machine entry since we merged it
-        db.delete(machine)
-        db.commit()
-        return {"status": "success", "approval_status": target_machine.approval_status, "reassociated_to": target_machine.id}
-
     machine.approval_status = approval.status
     db.commit()
     return {"status": "success", "approval_status": machine.approval_status}
