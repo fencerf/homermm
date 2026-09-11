@@ -52,7 +52,10 @@ class StandardPollingListener(BaseListener):
                     for task in tasks:
                         self._handle_task(task)
             except Exception as e:
-                logger.error(f"Polling error: {e}")
+                if self.running:
+                    logger.error(f"Polling error: {e}")
+                else:
+                    break
             time.sleep(5)
 
 class LongPollingListener(BaseListener):
@@ -68,8 +71,11 @@ class LongPollingListener(BaseListener):
             except requests.exceptions.ReadTimeout:
                 pass # Normal for long polling
             except Exception as e:
-                logger.error(f"Long polling error: {e}")
-                time.sleep(5)
+                if self.running:
+                    logger.error(f"Long polling error: {e}")
+                    time.sleep(5)
+                else:
+                    break
 
 class SSEListener(BaseListener):
     def start(self):
