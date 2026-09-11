@@ -528,6 +528,7 @@ def get_available_updates():
     return updates
 
 def execute_task(task):
+    global MACHINE_ID
     # Set the action ID in the thread-local context so any logs emitted correlate to this task
     local_data.action_id = task.get("action_id")
 
@@ -545,7 +546,6 @@ def execute_task(task):
 
     elif task_type == "check_updates":
         logger.info("Received request to check for updates.")
-        global MACHINE_ID
         if MACHINE_ID:
             updates = get_available_updates()
             update_headers()
@@ -1098,7 +1098,6 @@ def execute_task(task):
     elif task_type == "wipe_config_and_restart":
         logger.warning("Received wipe_config_and_restart task. Deprovisioning agent...")
         try:
-            global MACHINE_ID
             MACHINE_ID = None
             config_data = {}
             if os.path.exists(CONFIG_PATH):
@@ -1268,7 +1267,6 @@ def heartbeat_loop():
             resp = requests.post(f"{SERVER_URL}/api/agent/register", json=sys_info, headers=HEADERS, verify=VERIFY_SSL)
             if resp.status_code == 401:
                 logger.error("401 Unauthorized during heartbeat. The agent's key may not match the server's record. Re-enrolling...")
-                global MACHINE_ID
                 MACHINE_ID = None
                 config_data = {}
                 if os.path.exists(CONFIG_PATH):
